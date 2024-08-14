@@ -10,7 +10,6 @@ from typing import IO, Literal
 
 # TODO: Better checks
 # TODO: Support for exception groups
-# TODO: Remove common indentation
 # TODO: User vs lib tb kinds
 # TODO: Avoid repeating recursive calls e.g. infinite loop
 # TODO: Test syntax errors
@@ -39,8 +38,14 @@ class EscapeSequences:
       self.underline = ''
 
 
-def get_integer_width(x: int):
+def get_integer_width(x: int, /):
   return max(math.ceil(math.log10(x + 1)), 1)
+
+def get_line_indentation(line: str, /):
+  return len(line) - len(line.lstrip())
+
+def get_common_indentation(lines: list[str], /):
+  return min(len(line) - len(stripped_line) for line in lines if (stripped_line := line.lstrip()))
 
 
 def dump(
@@ -52,6 +57,8 @@ def dump(
     max_context_lines_after: int = 2,
     max_context_lines_before: int = 3,
     max_target_lines: int = 5,
+    skip_indentation_highlight: bool = True,
+    remove_common_indentation: bool = True,
   ):
   escape = EscapeSequences(file, disable_color=disable_color)
 
@@ -186,7 +193,11 @@ def dump(
               context_line_end -= 1
 
 
-            # Compute line number width
+            # Compute line parameters
+
+            # Also includes cut target lines
+            displayed_lines = code_lines[(context_line_start - 1):context_line_end]
+            common_indentation = get_common_indentation(displayed_lines) if remove_common_indentation else 0
 
             line_number_width = get_integer_width(context_line_end)
 
@@ -198,7 +209,7 @@ def dump(
 
             for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
               line_number = context_line_start + rel_line_index
-              trace += f'{indent}{line_number: >{line_number_width}} {line}\n'
+              trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
 
             if context_line_start != line_start:
               trace += escape.reset
@@ -210,24 +221,30 @@ def dump(
 
             for rel_line_index, line in enumerate(target_lines):
               line_number = line_start + rel_line_index
-              line_indent = len(line) - len(line.lstrip())
+              line_indent = (get_line_indentation(line) if skip_indentation_highlight else 0)
 
               if line_number == line_start:
-                anchor_offset = col_start
+                anchor_start = col_start
 
                 if line_start == line_end:
-                  anchor_length = col_end - col_start
+                  anchor_end = col_end
                 else:
-                  anchor_length = len(line) - col_start
+                  anchor_end = len(line) - col_start
               elif line_number == line_end:
-                anchor_offset = line_indent
-                anchor_length = col_end - line_indent
+                anchor_start = line_indent
+                anchor_end = col_end
               else:
-                anchor_offset = line_indent
-                anchor_length = len(line) - line_indent
+                anchor_start = line_indent
+                anchor_end = len(line)
 
-              trace += f'{indent}{line_number: >{line_number_width}} {line}\n'
-              trace += indent + ' ' * (line_number_width + 1 + anchor_offset) + escape.red + '^' * anchor_length + escape.reset + '\n'
+              anchor_start_sub = max(anchor_start - common_indentation, 0)
+              anchor_end_sub = max(anchor_end - common_indentation, 0)
+
+              trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
+              trace += indent + ' ' * (line_number_width + 1 + anchor_start_sub)
+              trace += escape.red
+              trace += '^' * (anchor_end_sub - anchor_start_sub)
+              trace += escape.reset + '\n'
 
             if line_end_cut != line_end:
               trace += f'{indent}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]\n'
@@ -240,7 +257,7 @@ def dump(
 
             for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
               line_number = line_end + rel_line_index + 1
-              trace += f'{indent}{line_number: >{line_number_width}} {line}\n'
+              trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
 
             if context_line_end != line_end:
               trace += escape.reset
