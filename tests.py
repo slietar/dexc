@@ -45,16 +45,26 @@ def test5():
   ])
 
 
+# Frame in locals
+
+def test6():
+  def a():
+    raise Exception
+
+  a()
+
+
 for test in [
   test1,
   test2,
   test3,
   # test4,
   test5,
+  test6,
 ]:
+  print(f'-- {test.__name__} {'-' * 80}')
+
   try:
     test()
   except Exception as e:
     dump(e, sys.stdout)
-
-  print('-' * 80)

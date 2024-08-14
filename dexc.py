@@ -1,5 +1,7 @@
+from dataclasses import dataclass
 import itertools
 import math
+import os
 import sys
 from pathlib import Path
 from types import TracebackType
@@ -8,21 +10,33 @@ from typing import IO, Literal
 
 # TODO: Better checks
 # TODO: Support for exception groups
-# TODO: Fix ANSI escape sequences
 # TODO: Remove common indentation
-# TODO: Disabling color
 # TODO: User vs lib tb kinds
 # TODO: Max number of displayed lines for a tb
-# TODO: Support for format() instead of directly writing
 # TODO: Avoid repeating recursive calls e.g. infinite loop
 
+@dataclass(slots=True)
+class EscapeSequences:
+  bright_black: str
+  italic: str
+  red: str
+  reset: str
+  underline: str
 
-class EscapeSeq:
-  bright_black = '\033[90m'
-  italic = '\033[3m'
-  red = '\033[31m'
-  reset = '\033[0m'
-  underline = '\033[4m'
+  def __init__(self, file: IO, *, disable_color: bool = False):
+    if not (disable_color or not file.isatty() or os.environ.get('NO_COLOR')):
+      self.bright_black = '\033[90m'
+      self.italic = '\033[3m'
+      self.red = '\033[31m'
+      self.reset = '\033[0m'
+      self.underline = '\033[4m'
+    else:
+      self.bright_black = ''
+      self.italic = ''
+      self.red = ''
+      self.reset = ''
+      self.underline = ''
+
 
 MAX_CONTEXT_LINES_BEFORE = 3
 MAX_CONTEXT_LINES_AFTER = 2
@@ -31,7 +45,18 @@ def get_integer_width(x: int):
   return max(math.ceil(math.log10(x + 1)), 1)
 
 
-def dump(start_exc: BaseException, /, file: IO[str]):
+def dump(
+    start_exc: BaseException,
+    /,
+    file: IO[str],
+    *,
+    disable_color: bool = False,
+  ):
+  escape = EscapeSequences(file, disable_color=disable_color)
+
+
+  # List exceptions
+
   current_exc = start_exc
   excs = list[tuple[BaseException, Literal['base', 'cause', 'context']]]()
   excs.append((current_exc, 'base'))
@@ -46,16 +71,27 @@ def dump(start_exc: BaseException, /, file: IO[str]):
     else:
       break
 
+
+  # Print exceptions
+
   for exc, exc_kind in excs:
+    # Write possible cause or context explanation
+
     match exc_kind:
       case 'base':
         pass
       case 'cause':
-        file.write(f'\n{EscapeSeq.italic}[Caused by]{EscapeSeq.reset}\n\n')
+        file.write(f'\n{escape.italic}[Caused by]{escape.reset}\n\n')
       case 'context':
-        file.write(f'\n{EscapeSeq.italic}[Raised while handling]{EscapeSeq.reset}\n\n')
+        file.write(f'\n{escape.italic}[Raised while handling]{escape.reset}\n\n')
+
+
+    # Write exception message
 
     file.write(f'{type(exc).__name__}: {exc}\n')
+
+
+    # List frames
 
     current_tb = exc.__traceback__
     tbs = list[TracebackType]()
@@ -63,6 +99,9 @@ def dump(start_exc: BaseException, /, file: IO[str]):
     while current_tb:
       tbs.append(current_tb)
       current_tb = current_tb.tb_next
+
+
+    # Write frames
 
     for tb_index, tb in enumerate(reversed(tbs)):
       frame = tb.tb_frame
@@ -144,14 +183,14 @@ def dump(start_exc: BaseException, /, file: IO[str]):
             # Display context before target
 
             if context_line_start != line_start:
-              trace += EscapeSeq.bright_black
+              trace += escape.bright_black
 
             for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
               line_number = context_line_start + rel_line_index
               trace += f'{indent}{line_number: >{line_number_width}} {line}\n'
 
             if context_line_start != line_start:
-              trace += EscapeSeq.reset
+              trace += escape.reset
 
 
             # Display target
@@ -177,19 +216,19 @@ def dump(start_exc: BaseException, /, file: IO[str]):
                 anchor_length = len(line) - line_indent
 
               trace += f'{indent}{line_number: >{line_number_width}} {line}\n'
-              trace += indent + ' ' * (line_number_width + 1 + anchor_offset) + EscapeSeq.red + '^' * anchor_length + EscapeSeq.reset + '\n'
+              trace += indent + ' ' * (line_number_width + 1 + anchor_offset) + escape.red + '^' * anchor_length + escape.reset + '\n'
 
             # Display context after target
 
             if context_line_end != line_end:
-              trace += EscapeSeq.bright_black
+              trace += escape.bright_black
 
             for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
               line_number = line_end + rel_line_index + 1
               trace += f'{indent}{line_number: >{line_number_width}} {line}\n'
 
             if context_line_end != line_end:
-              trace += EscapeSeq.reset
+              trace += escape.reset
 
             trace += '\n'
           else:
@@ -197,8 +236,8 @@ def dump(start_exc: BaseException, /, file: IO[str]):
         else:
           trace = None
 
-      color = EscapeSeq.bright_black if (kind != 'user') and (tb_index != 0) else ''
-      file.write(f'{color}  at {EscapeSeq.underline if trace is not None else ''}{frame_code.co_qualname}{EscapeSeq.reset}{color} ({module_name}{f':{frame.f_lineno}' if kind != 'internal' else ''}){EscapeSeq.reset}\n')
+      color = escape.bright_black if (kind != 'user') and (tb_index != 0) else ''
+      file.write(f'{color}  at {escape.underline if trace is not None else ''}{frame_code.co_qualname}{escape.reset}{color} ({module_name}{f':{frame.f_lineno}' if kind != 'internal' else ''}){escape.reset}\n')
 
       if trace is not None:
         file.write(trace)
