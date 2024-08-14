@@ -10,9 +10,10 @@ from typing import IO, Literal, Optional
 
 
 # TODO: Better checks
-# TODO: Support for exception groups
+# TODO: Improve support for exception groups
 # TODO: User vs lib tb kinds
 # TODO: Avoid repeating recursive calls e.g. infinite loop
+# TODO: Maximum screen width
 
 @dataclass(slots=True)
 class EscapeSequences:
@@ -91,12 +92,14 @@ class Options:
   skip_indentation_highlight: bool = True
   remove_common_indentation: bool = True
 
+
 def format_frame(
     escape: EscapeSequences,
     frame_index: int,
     func_name: str,
     raw_path: str,
     positions: Optional[tuple[Optional[int], Optional[int], Optional[int], Optional[int]]],
+    prefix: str,
     options: Options
   ):
   is_reraise = False
@@ -197,17 +200,11 @@ def format_frame(
           # Display context before target
 
           indent = ' ' * 4
-          trace = ''
-
-          if context_line_start != line_start:
-            trace += escape.bright_black
+          trace = f''
 
           for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
             line_number = context_line_start + rel_line_index
-            trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
-
-          if context_line_start != line_start:
-            trace += escape.reset
+            trace += f'{prefix}{escape.bright_black}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}{escape.reset}\n'
 
 
           # Display target
@@ -235,48 +232,50 @@ def format_frame(
             anchor_start_sub = max(anchor_start - common_indentation, 0)
             anchor_end_sub = max(anchor_end - common_indentation, 0)
 
-            trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
-            trace += indent + ' ' * (line_number_width + 1 + anchor_start_sub)
+            trace += f'{prefix}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
+            trace += prefix + indent + ' ' * (line_number_width + 1 + anchor_start_sub)
             trace += escape.red
             trace += '^' * (anchor_end_sub - anchor_start_sub)
             trace += escape.reset + '\n'
 
           if line_end_cut != line_end:
-            trace += f'{indent}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]\n'
+            trace += f'{prefix}{indent}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]\n'
 
 
           # Display context after target
 
-          if context_line_end != line_end:
-            trace += escape.bright_black
-
           for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
             line_number = line_end + rel_line_index + 1
-            trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
+            trace += f'{prefix}{escape.bright_black}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}{escape.reset}\n'
 
-          if context_line_end != line_end:
-            trace += escape.reset
-
-          trace += '\n'
+          trace += f'{prefix}\n'
 
   color = escape.bright_black if (kind != 'user') and (frame_index != 0) else ''
-  return f'{color}  at {escape.underline if trace is not None else ''}{func_name}{escape.reset}'\
+
+  return f'{prefix}{color}  at {escape.underline if trace is not None else ''}{func_name}{escape.reset}'\
     + f'{color} ({module_name}{f':{positions[0]}' if (kind != 'internal') and (positions is not None) and (positions[0] is not None) else ''})'\
     + f'{' [re-raise]' if is_reraise else ''}{escape.reset}\n' + (trace or '')
 
 
+def write_exc(start_exc: BaseException, file: IO[str], *, escape: EscapeSequences, options: Options, prefix: str):
+  screen_width = 80
 
-def dump(
-    start_exc: BaseException,
-    /,
-    file: IO[str],
-    *,
-    disable_color: bool = False,
-    options: Options = Options()
-  ):
-  escape = EscapeSequences(file, disable_color=disable_color)
+  if isinstance(start_exc, (BaseExceptionGroup, ExceptionGroup)):
+    write_exc_core(start_exc, file, escape=escape, options=options, prefix=f' | {prefix}', prefix_first=f'{prefix} + ')
+
+    line = f'{prefix} +--+'
+    file.write(f'{line}{'-' * (screen_width - len(line))}\n')
+
+    for exc in start_exc.exceptions:
+      write_exc(exc, file, escape=escape, options=options, prefix=f'    | {prefix}')
+
+      line = f'{prefix}    +'
+      file.write(f'{line}{'-' * (screen_width - len(line))}\n')
+  else:
+    write_exc_core(start_exc, file, escape=escape, options=options, prefix=prefix, prefix_first=prefix)
 
 
+def write_exc_core(start_exc: BaseException, file: IO[str], *, escape: EscapeSequences, options: Options, prefix: str, prefix_first: str):
   # List exceptions
 
   current_exc = start_exc
@@ -303,14 +302,14 @@ def dump(
       case 'base':
         pass
       case 'cause':
-        file.write(f'\n{escape.italic}[Caused by]{escape.reset}\n\n')
+        file.write(f'{prefix}\n{escape.italic}[Caused by]{escape.reset}\n{prefix}\n')
       case 'context':
-        file.write(f'\n{escape.italic}[Raised while handling]{escape.reset}\n\n')
+        file.write(f'{prefix}\n{escape.italic}[Raised while handling]{escape.reset}\n{prefix}\n')
 
 
     # Write exception message
 
-    file.write(f'{type(exc).__name__}: {exc}\n')
+    file.write(f'{prefix_first}{type(exc).__name__}: {exc}\n')
 
 
     # List frames
@@ -332,6 +331,7 @@ def dump(
         escape=escape,
         frame_index=0,
         func_name=Path(exc.filename).name,
+        prefix=prefix,
         raw_path=exc.filename,
         positions=(
           exc.lineno,
@@ -357,10 +357,25 @@ def dump(
         escape=escape,
         frame_index=(tb_index + (1 if is_syntax_error else 0)),
         func_name=frame_code.co_qualname,
+        prefix=prefix,
         raw_path=raw_path,
         positions=positions,
         options=options
       ))
+
+
+def dump(
+    start_exc: BaseException,
+    /,
+    file: IO[str],
+    *,
+    disable_color: bool = False,
+    options: Options = Options()
+  ):
+  escape = EscapeSequences(file, disable_color=disable_color)
+
+  write_exc(start_exc, file, escape=escape, options=options, prefix='')
+
 
 def install(file: IO[str] = sys.stderr):
   def hook(start_exc_type: type[BaseException], start_exc: BaseException, start_tb: TracebackType):
