@@ -6,14 +6,13 @@ import os
 import sys
 from pathlib import Path
 from types import TracebackType
-from typing import IO, Literal
+from typing import IO, Literal, Optional
 
 
 # TODO: Better checks
 # TODO: Support for exception groups
 # TODO: User vs lib tb kinds
 # TODO: Avoid repeating recursive calls e.g. infinite loop
-# TODO: Test syntax errors
 
 @dataclass(slots=True)
 class EscapeSequences:
@@ -81,7 +80,190 @@ def identify_node(mod: ast.Module, line_start: int, line_end: int, col_start: in
     if len(candidates_matching) == 1:
       best_candidate = candidates_matching[0]
     else:
-      return best_candidate
+      return best_candidate # type: ignore
+
+
+@dataclass(kw_only=True, slots=True)
+class Options:
+  max_context_lines_after: int = 2
+  max_context_lines_before: int = 3
+  max_target_lines: int = 5
+  skip_indentation_highlight: bool = True
+  remove_common_indentation: bool = True
+
+def format_frame(
+    escape: EscapeSequences,
+    frame_index: int,
+    func_name: str,
+    raw_path: str,
+    positions: Optional[tuple[Optional[int], Optional[int], Optional[int], Optional[int]]],
+    options: Options
+  ):
+  is_reraise = False
+  trace = None
+
+  if raw_path[0] == '<':
+    kind = 'internal'
+    module_name = raw_path
+  else:
+    # Locate module
+
+    frame_path = Path(raw_path)
+
+    # for sys_path in (*sys.path, Path.cwd()):
+    for sys_path in sys.path:
+      try:
+        rel_path = frame_path.relative_to(sys_path)
+      except ValueError:
+        pass
+      else:
+        *directories, file_name = rel_path.parts
+
+        module_path = directories + [file_name.removesuffix('.py')]
+        module_name = '.'.join(module_path)
+        kind = 'std' if module_path[0] in sys.stdlib_module_names else 'user'
+
+        break
+    else:
+      kind = 'user'
+      module_name = raw_path
+
+
+    if (frame_index == 0) or (
+      (kind == 'user') and
+      (frame_index < 3)
+    ):
+      # Produce trace
+
+      if positions is not None:
+        try:
+          frame_contents = frame_path.read_text()
+        except OSError:
+          frame_contents = None
+
+        if frame_contents is not None:
+          # Obtain target line range
+
+          line_start, line_end, col_start, col_end = positions
+          code_lines = frame_contents.splitlines()
+
+          # Line numbers start at 1
+          assert (line_start is not None) and (line_end is not None) and (col_start is not None) and (col_end is not None)
+
+
+          # Detect re-raise
+
+          if frame_index > 0:
+            mod = ast.parse(frame_contents)
+            node = identify_node(mod, line_start, line_end, col_start, col_end)
+            is_reraise = isinstance(node, ast.Raise)
+
+
+          # Compute target line range
+
+          # Ensure there are no more than max_total_lines target lines
+          if line_end - line_start + 1 > options.max_target_lines:
+            # The "more lines" message always mentions at least 2 lines
+            line_end_cut = line_start + options.max_target_lines - 2
+          else:
+            line_end_cut = line_end
+
+          # Old version
+          # line_end_cut = line_start + min(line_end - line_start, max_target_lines - 1)
+
+
+          # Compute context line range
+
+          context_line_start = max(line_start - options.max_context_lines_before, 1)
+          context_line_end = min(line_end + options.max_context_lines_after, len(code_lines))
+
+          while (context_line_start < line_start) and (not (context_line := code_lines[context_line_start - 1]) or context_line.isspace()):
+            context_line_start += 1
+
+          # This must be done beforehand in order to calculate the maximum line width
+          while (context_line_end > line_end) and (not (context_line := code_lines[context_line_end - 1]) or context_line.isspace()):
+            context_line_end -= 1
+
+
+          # Compute line parameters
+
+          # Also includes cut target lines
+          displayed_lines = code_lines[(context_line_start - 1):context_line_end]
+          common_indentation = get_common_indentation(displayed_lines) if options.remove_common_indentation else 0
+
+          line_number_width = get_integer_width(context_line_end)
+
+
+          # Display context before target
+
+          indent = ' ' * 4
+          trace = ''
+
+          if context_line_start != line_start:
+            trace += escape.bright_black
+
+          for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
+            line_number = context_line_start + rel_line_index
+            trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
+
+          if context_line_start != line_start:
+            trace += escape.reset
+
+
+          # Display target
+
+          target_lines = code_lines[(line_start - 1):line_end_cut]
+
+          for rel_line_index, line in enumerate(target_lines):
+            line_number = line_start + rel_line_index
+            line_indent = (get_line_indentation(line) if options.skip_indentation_highlight else 0)
+
+            if line_number == line_start:
+              anchor_start = col_start
+
+              if line_start == line_end:
+                anchor_end = col_end
+              else:
+                anchor_end = len(line) - col_start
+            elif line_number == line_end:
+              anchor_start = line_indent
+              anchor_end = col_end
+            else:
+              anchor_start = line_indent
+              anchor_end = len(line)
+
+            anchor_start_sub = max(anchor_start - common_indentation, 0)
+            anchor_end_sub = max(anchor_end - common_indentation, 0)
+
+            trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
+            trace += indent + ' ' * (line_number_width + 1 + anchor_start_sub)
+            trace += escape.red
+            trace += '^' * (anchor_end_sub - anchor_start_sub)
+            trace += escape.reset + '\n'
+
+          if line_end_cut != line_end:
+            trace += f'{indent}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]\n'
+
+
+          # Display context after target
+
+          if context_line_end != line_end:
+            trace += escape.bright_black
+
+          for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
+            line_number = line_end + rel_line_index + 1
+            trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
+
+          if context_line_end != line_end:
+            trace += escape.reset
+
+          trace += '\n'
+
+  color = escape.bright_black if (kind != 'user') and (frame_index != 0) else ''
+  return f'{color}  at {escape.underline if trace is not None else ''}{func_name}{escape.reset}'\
+    + f'{color} ({module_name}{f':{positions[0]}' if (kind != 'internal') and (positions is not None) and (positions[0] is not None) else ''})'\
+    + f'{' [re-raise]' if is_reraise else ''}{escape.reset}\n' + (trace or '')
+
 
 
 def dump(
@@ -90,11 +272,7 @@ def dump(
     file: IO[str],
     *,
     disable_color: bool = False,
-    max_context_lines_after: int = 2,
-    max_context_lines_before: int = 3,
-    max_target_lines: int = 5,
-    skip_indentation_highlight: bool = True,
-    remove_common_indentation: bool = True,
+    options: Options = Options()
   ):
   escape = EscapeSequences(file, disable_color=disable_color)
 
@@ -147,190 +325,42 @@ def dump(
 
     # Write frames
 
+    is_syntax_error = isinstance(exc, SyntaxError)
+
+    if is_syntax_error:
+      file.write(format_frame(
+        escape=escape,
+        frame_index=0,
+        func_name=Path(exc.filename).name,
+        raw_path=exc.filename,
+        positions=(
+          exc.lineno,
+          exc.end_lineno,
+          (exc.offset - 1) if exc.offset is not None else None,
+          (
+            (exc.end_offset - 1) if exc.end_offset > 0 else exc.offset
+          ) if exc.end_offset is not None else None
+        ),
+        options=options
+      ))
+
     for tb_index, tb in enumerate(reversed(tbs)):
       frame = tb.tb_frame
       frame_code = frame.f_code
-      frame_path_str = frame_code.co_filename
+      raw_path = frame_code.co_filename
 
-      is_reraise = False
+      positions = next(
+        itertools.islice(frame_code.co_positions(), tb.tb_lasti // 2, None)
+      ) if tb.tb_lasti >= 0 else None
 
-      if frame_path_str[0] == '<':
-        kind = 'internal'
-        module_name = frame_path_str
-        trace = None
-      else:
-        # Locate module
-
-        frame_path = Path(frame_path_str)
-
-        # for sys_path in (*sys.path, Path.cwd()):
-        for sys_path in sys.path:
-          try:
-            rel_path = frame_path.relative_to(sys_path)
-          except ValueError:
-            pass
-          else:
-            *directories, file_name = rel_path.parts
-
-            module_path = directories + [file_name.removesuffix('.py')]
-            module_name = '.'.join(module_path)
-            kind = 'std' if module_path[0] in sys.stdlib_module_names else 'user'
-
-            break
-        else:
-          kind = 'user'
-          module_name = frame_path_str
-
-
-        if (tb_index == 0) or (
-          (kind == 'user') and
-          (tb_index < 3)
-        ):
-          # Get positions
-
-          positions = next(
-            itertools.islice(frame_code.co_positions(), tb.tb_lasti // 2, None)
-          ) if tb.tb_lasti >= 0 else None
-
-
-          # Produce trace
-
-          if positions is not None:
-            try:
-              frame_contents = frame_path.read_text()
-            except OSError:
-              frame_contents = None
-
-            if frame_contents is not None:
-              # Obtain target line range
-
-              line_start, line_end, col_start, col_end = positions
-              code_lines = frame_contents.splitlines()
-
-              # Line numbers start at 1
-              assert (line_start is not None) and (line_end is not None) and (col_start is not None) and (col_end is not None)
-
-
-              # Detect re-raise
-
-              if tb_index > 0:
-                mod = ast.parse(frame_contents)
-                node = identify_node(mod, line_start, line_end, col_start, col_end)
-                is_reraise = isinstance(node, ast.Raise)
-
-
-              # Compute target line range
-
-              # Ensure there are no more than max_total_lines target lines
-              if line_end - line_start + 1 > max_target_lines:
-                # The "more lines" message always mentions at least 2 lines
-                line_end_cut = line_start + max_target_lines - 2
-              else:
-                line_end_cut = line_end
-
-              # Old version
-              # line_end_cut = line_start + min(line_end - line_start, max_target_lines - 1)
-
-
-              # Compute context line range
-
-              context_line_start = max(line_start - max_context_lines_before, 1)
-              context_line_end = min(line_end + max_context_lines_after, len(code_lines))
-
-              while (context_line_start < line_start) and (not (context_line := code_lines[context_line_start - 1]) or context_line.isspace()):
-                context_line_start += 1
-
-              # This must be done beforehand in order to calculate the maximum line width
-              while (context_line_end > line_end) and (not (context_line := code_lines[context_line_end - 1]) or context_line.isspace()):
-                context_line_end -= 1
-
-
-              # Compute line parameters
-
-              # Also includes cut target lines
-              displayed_lines = code_lines[(context_line_start - 1):context_line_end]
-              common_indentation = get_common_indentation(displayed_lines) if remove_common_indentation else 0
-
-              line_number_width = get_integer_width(context_line_end)
-
-
-              # Display context before target
-
-              indent = ' ' * 4
-              trace = ''
-
-              if context_line_start != line_start:
-                trace += escape.bright_black
-
-              for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
-                line_number = context_line_start + rel_line_index
-                trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
-
-              if context_line_start != line_start:
-                trace += escape.reset
-
-
-              # Display target
-
-              target_lines = code_lines[(line_start - 1):line_end_cut]
-
-              for rel_line_index, line in enumerate(target_lines):
-                line_number = line_start + rel_line_index
-                line_indent = (get_line_indentation(line) if skip_indentation_highlight else 0)
-
-                if line_number == line_start:
-                  anchor_start = col_start
-
-                  if line_start == line_end:
-                    anchor_end = col_end
-                  else:
-                    anchor_end = len(line) - col_start
-                elif line_number == line_end:
-                  anchor_start = line_indent
-                  anchor_end = col_end
-                else:
-                  anchor_start = line_indent
-                  anchor_end = len(line)
-
-                anchor_start_sub = max(anchor_start - common_indentation, 0)
-                anchor_end_sub = max(anchor_end - common_indentation, 0)
-
-                trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
-                trace += indent + ' ' * (line_number_width + 1 + anchor_start_sub)
-                trace += escape.red
-                trace += '^' * (anchor_end_sub - anchor_start_sub)
-                trace += escape.reset + '\n'
-
-              if line_end_cut != line_end:
-                trace += f'{indent}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]\n'
-
-
-              # Display context after target
-
-              if context_line_end != line_end:
-                trace += escape.bright_black
-
-              for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
-                line_number = line_end + rel_line_index + 1
-                trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
-
-              if context_line_end != line_end:
-                trace += escape.reset
-
-              trace += '\n'
-            else:
-              trace = None
-          else:
-            trace = None
-        else:
-          trace = None
-
-      color = escape.bright_black if (kind != 'user') and (tb_index != 0) else ''
-      file.write(f'{color}  at {escape.underline if trace is not None else ''}{frame_code.co_qualname}{escape.reset}{color} ({module_name}{f':{frame.f_lineno}' if kind != 'internal' else ''}){' [re-raise]' if is_reraise else ''}{escape.reset}\n')
-
-      if trace is not None:
-        file.write(trace)
-
+      file.write(format_frame(
+        escape=escape,
+        frame_index=(tb_index + (1 if is_syntax_error else 0)),
+        func_name=frame_code.co_qualname,
+        raw_path=raw_path,
+        positions=positions,
+        options=options
+      ))
 
 def install(file: IO[str] = sys.stderr):
   def hook(start_exc_type: type[BaseException], start_exc: BaseException, start_tb: TracebackType):

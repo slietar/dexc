@@ -1,5 +1,7 @@
+from pathlib import Path
 import sys
-from dexc import dump, install
+from tempfile import TemporaryDirectory
+from dexc import dump
 
 
 # Base test
@@ -76,6 +78,18 @@ def test8():
     raise e
 
 
+# Syntax error
+
+def test9():
+  with TemporaryDirectory(delete=False) as dir_path:
+    module_name = 'test9'
+    (Path(dir_path) / f'{module_name}.py').write_text('# Hi\nhello(')
+
+    sys.path.append(dir_path)
+
+    __import__(module_name)
+
+
 # ---
 
 
@@ -88,6 +102,7 @@ for test in [
   test6,
   test7,
   test8,
+  test9,
 ]:
   print(f'-- {test.__name__} {'-' * 80}')
 
