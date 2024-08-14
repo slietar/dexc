@@ -54,6 +54,31 @@ def test6():
   a()
 
 
+# Large number of lines in a frame
+
+def test7():
+  raise Exception([ # 1
+    # 2
+    # 3
+    # 4
+    # 5
+  ])
+
+  # Hi
+
+
+# Concatenated traces after re-raising an exception
+
+def test8():
+  try:
+    raise Exception
+  except Exception as e:
+    raise e
+
+
+# ---
+
+
 for test in [
   test1,
   test2,
@@ -61,6 +86,8 @@ for test in [
   # test4,
   test5,
   test6,
+  test7,
+  test8,
 ]:
   print(f'-- {test.__name__} {'-' * 80}')
 

@@ -12,8 +12,9 @@ from typing import IO, Literal
 # TODO: Support for exception groups
 # TODO: Remove common indentation
 # TODO: User vs lib tb kinds
-# TODO: Max number of displayed lines for a tb
 # TODO: Avoid repeating recursive calls e.g. infinite loop
+# TODO: Test syntax errors
+# TODO: Concatenated traces
 
 @dataclass(slots=True)
 class EscapeSequences:
@@ -38,9 +39,6 @@ class EscapeSequences:
       self.underline = ''
 
 
-MAX_CONTEXT_LINES_BEFORE = 3
-MAX_CONTEXT_LINES_AFTER = 2
-
 def get_integer_width(x: int):
   return max(math.ceil(math.log10(x + 1)), 1)
 
@@ -51,6 +49,9 @@ def dump(
     file: IO[str],
     *,
     disable_color: bool = False,
+    max_context_lines_after: int = 2,
+    max_context_lines_before: int = 3,
+    max_target_lines: int = 5,
   ):
   escape = EscapeSequences(file, disable_color=disable_color)
 
@@ -161,11 +162,21 @@ def dump(
             indent = ' ' * 4
             trace = ''
 
+            # Ensure there are no more than max_total_lines target lines
+            if line_end - line_start + 1 > max_target_lines:
+              # The "more lines" message always mentions at least 2 lines
+              line_end_cut = line_start + max_target_lines - 2
+            else:
+              line_end_cut = line_end
+
+            # Old version
+            # line_end_cut = line_start + min(line_end - line_start, max_target_lines - 1)
+
 
             # Compute context line range
 
-            context_line_start = max(line_start - MAX_CONTEXT_LINES_BEFORE, 1)
-            context_line_end = min(line_end + MAX_CONTEXT_LINES_AFTER, len(code_lines))
+            context_line_start = max(line_start - max_context_lines_before, 1)
+            context_line_end = min(line_end + max_context_lines_after, len(code_lines))
 
             while (context_line_start < line_start) and (not (context_line := code_lines[context_line_start - 1]) or context_line.isspace()):
               context_line_start += 1
@@ -195,20 +206,20 @@ def dump(
 
             # Display target
 
-            target_lines = code_lines[(line_start - 1):line_end]
+            target_lines = code_lines[(line_start - 1):line_end_cut]
 
             for rel_line_index, line in enumerate(target_lines):
               line_number = line_start + rel_line_index
               line_indent = len(line) - len(line.lstrip())
 
-              if rel_line_index == 0:
+              if line_number == line_start:
                 anchor_offset = col_start
 
                 if line_start == line_end:
                   anchor_length = col_end - col_start
                 else:
                   anchor_length = len(line) - col_start
-              elif rel_line_index == (len(target_lines) - 1):
+              elif line_number == line_end:
                 anchor_offset = line_indent
                 anchor_length = col_end - line_indent
               else:
@@ -217,6 +228,10 @@ def dump(
 
               trace += f'{indent}{line_number: >{line_number_width}} {line}\n'
               trace += indent + ' ' * (line_number_width + 1 + anchor_offset) + escape.red + '^' * anchor_length + escape.reset + '\n'
+
+            if line_end_cut != line_end:
+              trace += f'{indent}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]\n'
+
 
             # Display context after target
 
