@@ -196,122 +196,130 @@ def dump(
           # Produce trace
 
           if positions is not None:
-            # Obtain target line range
+            try:
+              frame_contents = frame_path.read_text()
+            except OSError:
+              frame_contents = None
 
-            line_start, line_end, col_start, col_end = positions
-            code_lines = frame_path.read_text().splitlines()
+            if frame_contents is not None:
+              # Obtain target line range
 
-            # Line numbers start at 1
-            assert (line_start is not None) and (line_end is not None) and (col_start is not None) and (col_end is not None)
+              line_start, line_end, col_start, col_end = positions
+              code_lines = frame_contents.splitlines()
 
-
-            # Detect re-raise
-
-            if tb_index > 0:
-              mod = ast.parse(frame_path.read_text())
-              node = identify_node(mod, line_start, line_end, col_start, col_end)
-              is_reraise = isinstance(node, ast.Raise)
+              # Line numbers start at 1
+              assert (line_start is not None) and (line_end is not None) and (col_start is not None) and (col_end is not None)
 
 
-            # Compute target line range
+              # Detect re-raise
 
-            # Ensure there are no more than max_total_lines target lines
-            if line_end - line_start + 1 > max_target_lines:
-              # The "more lines" message always mentions at least 2 lines
-              line_end_cut = line_start + max_target_lines - 2
-            else:
-              line_end_cut = line_end
-
-            # Old version
-            # line_end_cut = line_start + min(line_end - line_start, max_target_lines - 1)
+              if tb_index > 0:
+                mod = ast.parse(frame_contents)
+                node = identify_node(mod, line_start, line_end, col_start, col_end)
+                is_reraise = isinstance(node, ast.Raise)
 
 
-            # Compute context line range
+              # Compute target line range
 
-            context_line_start = max(line_start - max_context_lines_before, 1)
-            context_line_end = min(line_end + max_context_lines_after, len(code_lines))
+              # Ensure there are no more than max_total_lines target lines
+              if line_end - line_start + 1 > max_target_lines:
+                # The "more lines" message always mentions at least 2 lines
+                line_end_cut = line_start + max_target_lines - 2
+              else:
+                line_end_cut = line_end
 
-            while (context_line_start < line_start) and (not (context_line := code_lines[context_line_start - 1]) or context_line.isspace()):
-              context_line_start += 1
-
-            # This must be done beforehand in order to calculate the maximum line width
-            while (context_line_end > line_end) and (not (context_line := code_lines[context_line_end - 1]) or context_line.isspace()):
-              context_line_end -= 1
-
-
-            # Compute line parameters
-
-            # Also includes cut target lines
-            displayed_lines = code_lines[(context_line_start - 1):context_line_end]
-            common_indentation = get_common_indentation(displayed_lines) if remove_common_indentation else 0
-
-            line_number_width = get_integer_width(context_line_end)
+              # Old version
+              # line_end_cut = line_start + min(line_end - line_start, max_target_lines - 1)
 
 
-            # Display context before target
+              # Compute context line range
 
-            indent = ' ' * 4
-            trace = ''
+              context_line_start = max(line_start - max_context_lines_before, 1)
+              context_line_end = min(line_end + max_context_lines_after, len(code_lines))
 
-            if context_line_start != line_start:
-              trace += escape.bright_black
+              while (context_line_start < line_start) and (not (context_line := code_lines[context_line_start - 1]) or context_line.isspace()):
+                context_line_start += 1
 
-            for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
-              line_number = context_line_start + rel_line_index
-              trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
-
-            if context_line_start != line_start:
-              trace += escape.reset
+              # This must be done beforehand in order to calculate the maximum line width
+              while (context_line_end > line_end) and (not (context_line := code_lines[context_line_end - 1]) or context_line.isspace()):
+                context_line_end -= 1
 
 
-            # Display target
+              # Compute line parameters
 
-            target_lines = code_lines[(line_start - 1):line_end_cut]
+              # Also includes cut target lines
+              displayed_lines = code_lines[(context_line_start - 1):context_line_end]
+              common_indentation = get_common_indentation(displayed_lines) if remove_common_indentation else 0
 
-            for rel_line_index, line in enumerate(target_lines):
-              line_number = line_start + rel_line_index
-              line_indent = (get_line_indentation(line) if skip_indentation_highlight else 0)
+              line_number_width = get_integer_width(context_line_end)
 
-              if line_number == line_start:
-                anchor_start = col_start
 
-                if line_start == line_end:
+              # Display context before target
+
+              indent = ' ' * 4
+              trace = ''
+
+              if context_line_start != line_start:
+                trace += escape.bright_black
+
+              for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
+                line_number = context_line_start + rel_line_index
+                trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
+
+              if context_line_start != line_start:
+                trace += escape.reset
+
+
+              # Display target
+
+              target_lines = code_lines[(line_start - 1):line_end_cut]
+
+              for rel_line_index, line in enumerate(target_lines):
+                line_number = line_start + rel_line_index
+                line_indent = (get_line_indentation(line) if skip_indentation_highlight else 0)
+
+                if line_number == line_start:
+                  anchor_start = col_start
+
+                  if line_start == line_end:
+                    anchor_end = col_end
+                  else:
+                    anchor_end = len(line) - col_start
+                elif line_number == line_end:
+                  anchor_start = line_indent
                   anchor_end = col_end
                 else:
-                  anchor_end = len(line) - col_start
-              elif line_number == line_end:
-                anchor_start = line_indent
-                anchor_end = col_end
-              else:
-                anchor_start = line_indent
-                anchor_end = len(line)
+                  anchor_start = line_indent
+                  anchor_end = len(line)
 
-              anchor_start_sub = max(anchor_start - common_indentation, 0)
-              anchor_end_sub = max(anchor_end - common_indentation, 0)
+                anchor_start_sub = max(anchor_start - common_indentation, 0)
+                anchor_end_sub = max(anchor_end - common_indentation, 0)
 
-              trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
-              trace += indent + ' ' * (line_number_width + 1 + anchor_start_sub)
-              trace += escape.red
-              trace += '^' * (anchor_end_sub - anchor_start_sub)
-              trace += escape.reset + '\n'
+                trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
+                trace += indent + ' ' * (line_number_width + 1 + anchor_start_sub)
+                trace += escape.red
+                trace += '^' * (anchor_end_sub - anchor_start_sub)
+                trace += escape.reset + '\n'
 
-            if line_end_cut != line_end:
-              trace += f'{indent}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]\n'
+              if line_end_cut != line_end:
+                trace += f'{indent}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]\n'
 
 
-            # Display context after target
+              # Display context after target
 
-            if context_line_end != line_end:
-              trace += escape.bright_black
+              if context_line_end != line_end:
+                trace += escape.bright_black
 
-            for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
-              line_number = line_end + rel_line_index + 1
-              trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
+              for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
+                line_number = line_end + rel_line_index + 1
+                trace += f'{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
 
-            if context_line_end != line_end:
-              trace += escape.reset
+              if context_line_end != line_end:
+                trace += escape.reset
 
-            trace += '\n'
+              trace += '\n'
+            else:
+              trace = None
           else:
             trace = None
         else:
