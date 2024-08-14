@@ -1,3 +1,4 @@
+import ast
 from dataclasses import dataclass
 import itertools
 import math
@@ -13,7 +14,6 @@ from typing import IO, Literal
 # TODO: User vs lib tb kinds
 # TODO: Avoid repeating recursive calls e.g. infinite loop
 # TODO: Test syntax errors
-# TODO: Concatenated traces
 
 @dataclass(slots=True)
 class EscapeSequences:
@@ -46,6 +46,42 @@ def get_line_indentation(line: str, /):
 
 def get_common_indentation(lines: list[str], /):
   return min(len(line) - len(stripped_line) for line in lines if (stripped_line := line.lstrip()))
+
+
+def identify_node(mod: ast.Module, line_start: int, line_end: int, col_start: int, col_end: int) -> ast.Module | ast.expr | ast.stmt:
+  best_candidate: ast.Module | ast.expr | ast.stmt = mod
+
+  def node_matches(node: ast.expr | ast.stmt):
+    assert node.end_lineno is not None
+
+    # TODO: Improve to support columns
+    return (node.lineno <= line_start) and (node.end_lineno >= line_end)
+
+  while True:
+    new_candidates = list[ast.expr | ast.stmt]()
+
+    match best_candidate:
+      case ast.ExceptHandler(type, name, body):
+        new_candidates += [type, *body]
+      case ast.Expr(value):
+        new_candidates.append(value)
+      case ast.FunctionDef(body=body):
+        new_candidates += body
+      case ast.Module(body=body):
+        new_candidates += body
+      case ast.For(target, iter, body, orelse, type_comment):
+        new_candidates += [target, iter, *body, *orelse]
+      case ast.Try(body, handlers, orelse, finalbody) | ast.TryStar(body, handlers, orelse, finalbody):
+        new_candidates += [*body, *handlers, *orelse, *finalbody]
+      case _:
+        return best_candidate
+
+    candidates_matching = [candidate for candidate in new_candidates if node_matches(candidate)]
+
+    if len(candidates_matching) == 1:
+      best_candidate = candidates_matching[0]
+    else:
+      return best_candidate
 
 
 def dump(
@@ -116,6 +152,8 @@ def dump(
       frame_code = frame.f_code
       frame_path_str = frame_code.co_filename
 
+      is_reraise = False
+
       if frame_path_str[0] == '<':
         kind = 'internal'
         module_name = frame_path_str
@@ -150,24 +188,32 @@ def dump(
         ):
           # Get positions
 
-          if tb.tb_lasti < 0:
-            positions = None
-          else:
-            positions_gen = frame_code.co_positions()
-            positions = next(itertools.islice(positions_gen, tb.tb_lasti // 2, None))
+          positions = next(
+            itertools.islice(frame_code.co_positions(), tb.tb_lasti // 2, None)
+          ) if tb.tb_lasti >= 0 else None
 
 
           # Produce trace
 
           if positions is not None:
+            # Obtain target line range
+
             line_start, line_end, col_start, col_end = positions
             code_lines = frame_path.read_text().splitlines()
 
             # Line numbers start at 1
             assert (line_start is not None) and (line_end is not None) and (col_start is not None) and (col_end is not None)
 
-            indent = ' ' * 4
-            trace = ''
+
+            # Detect re-raise
+
+            if tb_index > 0:
+              mod = ast.parse(frame_path.read_text())
+              node = identify_node(mod, line_start, line_end, col_start, col_end)
+              is_reraise = isinstance(node, ast.Raise)
+
+
+            # Compute target line range
 
             # Ensure there are no more than max_total_lines target lines
             if line_end - line_start + 1 > max_target_lines:
@@ -203,6 +249,9 @@ def dump(
 
 
             # Display context before target
+
+            indent = ' ' * 4
+            trace = ''
 
             if context_line_start != line_start:
               trace += escape.bright_black
@@ -269,7 +318,7 @@ def dump(
           trace = None
 
       color = escape.bright_black if (kind != 'user') and (tb_index != 0) else ''
-      file.write(f'{color}  at {escape.underline if trace is not None else ''}{frame_code.co_qualname}{escape.reset}{color} ({module_name}{f':{frame.f_lineno}' if kind != 'internal' else ''}){escape.reset}\n')
+      file.write(f'{color}  at {escape.underline if trace is not None else ''}{frame_code.co_qualname}{escape.reset}{color} ({module_name}{f':{frame.f_lineno}' if kind != 'internal' else ''}){' [re-raise]' if is_reraise else ''}{escape.reset}\n')
 
       if trace is not None:
         file.write(trace)
