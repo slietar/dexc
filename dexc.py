@@ -11,9 +11,13 @@ from typing import IO, Literal, Optional
 
 # TODO: Better checks
 # TODO: Improve support for exception groups
-# TODO: User vs lib tb kinds
 # TODO: Avoid repeating recursive calls e.g. infinite loop
 # TODO: Maximum screen width
+# TODO: Option to reverse order
+# TODO: Better highlight re-raises
+# TODO: Handle multiprocessing.pool.RemoteTraceback which currently is text
+# TODO: Better highlighting using ast data (e.g. only highlight first line of for loop)
+
 
 @dataclass(slots=True)
 class EscapeSequences:
@@ -61,12 +65,16 @@ def identify_node(mod: ast.Module, line_start: int, line_end: int, col_start: in
     new_candidates = list[ast.expr | ast.stmt]()
 
     match best_candidate:
+      case ast.ClassDef(body=body):
+        new_candidates += body
       case ast.ExceptHandler(type, name, body):
         new_candidates += [type, *body]
       case ast.Expr(value):
         new_candidates.append(value)
-      case ast.FunctionDef(body=body):
+      case ast.AsyncFunctionDef(body=body) | ast.FunctionDef(body=body):
         new_candidates += body
+      case ast.If(test, body, orelse):
+        new_candidates += [test, *body, *orelse]
       case ast.Module(body=body):
         new_candidates += body
       case ast.For(target, iter, body, orelse, type_comment):
@@ -113,7 +121,6 @@ def format_frame(
 
     frame_path = Path(raw_path)
 
-    # for sys_path in (*sys.path, Path.cwd()):
     for sys_path in sys.path:
       try:
         rel_path = frame_path.relative_to(sys_path)
@@ -124,7 +131,16 @@ def format_frame(
 
         module_path = directories + [file_name.removesuffix('.py')]
         module_name = '.'.join(module_path)
-        kind = 'std' if module_path[0] in sys.stdlib_module_names else 'user'
+
+        if module_path[0] in sys.stdlib_module_names:
+          kind = 'std'
+        else:
+          try:
+            frame_path.relative_to(Path.cwd())
+          except ValueError:
+            kind = 'lib'
+          else:
+            kind = 'user'
 
         break
     else:
@@ -378,10 +394,14 @@ def dump(
 
 
 def install(file: IO[str] = sys.stderr):
-  def hook(start_exc_type: type[BaseException], start_exc: BaseException, start_tb: TracebackType):
+  def except_hook(start_exc_type: type[BaseException], start_exc: BaseException, start_tb: TracebackType):
     dump(start_exc, file)
 
-  sys.excepthook = hook
+  def unraisable_hook(arg):
+    dump(arg.exc_value, file)
+
+  sys.excepthook = except_hook
+  sys.unraisablehook = unraisable_hook
 
 
 __all__ = [

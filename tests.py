@@ -101,6 +101,16 @@ def test9():
     __import__(module_name)
 
 
+# Not testable: Unraisable exception
+
+def test10():
+  class A:
+    def __del__(self):
+      raise Exception
+
+  A()
+
+
 # ---
 
 
