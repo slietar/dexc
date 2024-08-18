@@ -1,0 +1,14 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+dynamic = ["description", "version"]
+name = "dexc"
+authors = [{ name = "Simon Liétar" }]
+classifiers = ["License :: OSI Approved :: European Union Public Licence 1.2 (EUPL 1.2)"]
+readme = "readme.md"
+requires-python = "~=3.12"
+
+[project.urls]
+Homepage = "https://github.com/slietar/dexc"

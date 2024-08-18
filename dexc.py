@@ -1,3 +1,10 @@
+"""
+Exception formatter that produces readable stack traces.
+"""
+
+__version__ = '0.0.0'
+
+
 import ast
 from dataclasses import dataclass
 import itertools
