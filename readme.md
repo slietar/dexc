@@ -38,6 +38,28 @@ It only supports Python 3.12 and later.
 - Avoid highlighting large nodes e.g. highlight a function and parentheses instead of the arguments if the function call is failing
 - Other [escape codes](https://iterm2.com/documentation-escape-codes.html) e.g. curly underlines or clickable file names
 - Other [characters](https://www.willmcgugan.com/blog/tech/post/ceo-just-wants-to-draw-boxes/)
+- Smaller traces when explicit raise
+- Adapt to window height
+- Bug when `[Caused by]` is inside exception groups
+- Show a single listing when the same file is in multiple frames
+- Show function and class definitions from earlier
+- Support for IPython e.g. by calling `IPython.get_ipython().set_custom_exc(...)` and ensuring there is still color there; metadata on which cell the exception was raised in
+  - https://github.com/ipython/ipython/blob/main/IPython/core/ultratb.py
+  - https://ipython.readthedocs.io/en/stable/api/generated/IPython.core.ultratb.html
+- When printing `[Raised while handling]` or `[Caused by]`, merge both traces at the try/except statement
+- When too many lines, show at least the first and last lines of the relevant statement
+- Protect against too many columns
+- Exception info serialization
+- Remove newline when highlight is on last line e.g.
+  ```
+      4 raise Exception
+        ^^^^^^^^^^^^^^^
+                                     <--- Remove this line
+  at _run_code (<frozen runpy>)
+  at _run_module_as_main (<frozen runpy>)
+  ```
+- Add env variable to disable hook
+- Only import on hook call
 
 
 ## Installation
@@ -55,7 +77,7 @@ dexc.install()
 ```
 
 
-## Prior art
+## Related work
 
 - [Pretty traceback](https://github.com/mbarkhau/pretty-traceback)
 - [Rich](https://www.willmcgugan.com/blog/tech/post/better-python-tracebacks-with-rich/)
