@@ -11,6 +11,13 @@ from typing import Literal, Optional, Sequence
 
 
 type AstNode = ast.Module | ast.expr | ast.stmt
+
+@dataclass(slots=True)
+class AstTarget:
+  node: AstNode
+  parents: Sequence[AstNode]
+
+
 type ModuleKind = Literal['internal', 'std', 'lib', 'user']
 
 @dataclass(frozen=True, slots=True)
@@ -24,7 +31,7 @@ class ModuleItem:
 @dataclass(eq=True, frozen=True, slots=True)
 class FrameItem:
   module: ModuleItem
-  node: Optional[AstNode]
+  target: Optional[AstTarget]
   reraise: bool
 
 
@@ -244,79 +251,92 @@ def extract_frame(
     # code_lines = frame_contents.splitlines()
 
     if (line_start is not None) and (line_end is not None):
-      node = identify_node(module_item.ast, line_start, line_end, col_start, col_end)
+      target = identify_node(module_item.ast, line_start, line_end, col_start, col_end)
     else:
-      node = None
+      target = None
   else:
-    node = None
+    target = None
 
   # print('Frame')
   # print(f'{kind=} {module_name=}')
-  # print('Node:', ast.unparse(node))
+  # print('Node:', ast.unparse(target.node))
   # print()
 
   return FrameItem(
     module=module_item,
-    node=node,
-    reraise=((frame_index > 0) and isinstance(node, ast.Raise)),
+    target=target,
+    reraise=((frame_index > 0) and isinstance(target, ast.Raise)),
   )
 
 
-def identify_node(mod: ast.Module, line_start: int, line_end: int, col_start: Optional[int], col_end: Optional[int]) -> AstNode:
-  best_candidate: ast.Module | ast.expr | ast.stmt = mod
-
+def identify_node(module: ast.Module, line_start: int, line_end: int, col_start: Optional[int], col_end: Optional[int]):
   def node_matches(node: ast.expr | ast.stmt):
-    # Line numbers start at 1
+    # Line numbers start at 1 and both ends are inclusive, for both AST nodes and exceptions
 
     if node.end_lineno is None:
       return False
 
+    # print(node, (node.lineno, node.end_lineno), (line_start, line_end))
+    # print(node, (node.col_offset, node.end_col_offset), (col_start, col_end))
+
     if not ((node.lineno <= line_start) and (node.end_lineno >= line_end)):
       return False
 
-    if (col_start is not None) and (col_end is not None) and (node.end_col_offset is not None):
-      if not ((node.col_offset <= col_start) and (node.end_col_offset >= col_end)):
-        return False
+    if (col_start is not None) and (node.lineno == line_start) and (node.col_offset > col_start):
+      # print('>', node.col_offset, col_start)
+      return False
+
+    if (col_end is not None) and (node.end_col_offset is not None) and (node.end_lineno == line_end) and (node.end_col_offset < col_end):
+      # print('>', node, node.end_lineno, line_end, node.end_col_offset, col_end)
+      return False
 
     return True
 
 
-  while True:
-    new_candidates = list[ast.expr | ast.stmt]()
+  current_node: AstNode = module
+  parent_nodes = list[AstNode]()
 
-    match best_candidate:
+  while True:
+    children_candidates = list[ast.expr | ast.stmt]()
+    nonchildren_candidates = list[ast.expr | ast.stmt]()
+
+    match current_node:
       case ast.Call(func, args, keywords):
-        new_candidates += [func, *args]
-        new_candidates += (keyword.value for keyword in keywords)
-      case ast.ClassDef(body=body):
-        new_candidates += body
+        nonchildren_candidates = [func, *args] + [keyword.value for keyword in keywords]
+      case ast.ClassDef(name, bases, keywords, body, decorator_list, type_params):
+        children_candidates += body
+        children_candidates += decorator_list
+        nonchildren_candidates += bases
       case ast.Expr(value):
-        new_candidates.append(value)
+        nonchildren_candidates.append(value)
       case ast.AsyncFunctionDef(body=body) | ast.FunctionDef(body=body):
-        new_candidates += body
+        children_candidates += body
       case ast.If(test, body, orelse):
-        new_candidates += [test, *body, *orelse]
+        children_candidates += [test, *body, *orelse]
       case ast.Module(body=body):
-        new_candidates += body
-      case ast.For(target, iter, body, orelse, type_comment):
-        new_candidates += [target, iter, *body, *orelse]
+        children_candidates += body
+      case ast.AsyncFor(target, iter, body, orelse, type_comment) | ast.For(target, iter, body, orelse, type_comment):
+        children_candidates += [target, iter, *body, *orelse]
       case ast.Try(body, handlers, orelse, finalbody) | ast.TryStar(body, handlers, orelse, finalbody):
-        new_candidates += [*body, *orelse, *finalbody]
-        new_candidates += [handler.type for handler in handlers]
+        children_candidates += [*body, *orelse, *finalbody]
+        nonchildren_candidates += [handler.type for handler in handlers]
 
         for handler in handlers:
-          new_candidates += handler.body
-      case ast.With(items, body, type_comment):
-        new_candidates += (item.context_expr for item in items)
-        new_candidates += body
+          children_candidates += handler.body
+      case ast.AsyncWith(items, body, type_comment) | ast.With(items, body, type_comment):
+        children_candidates += (item.context_expr for item in items)
+        children_candidates += body
       case _:
-        return best_candidate
+        return AstTarget(current_node, parent_nodes)
 
-
-    candidates_matching = [candidate for candidate in new_candidates if (candidate is not None) and node_matches(candidate)]
+    children_candidates_matching = [candidate for candidate in children_candidates if (candidate is not None) and node_matches(candidate)]
+    nonchildren_candidates_matching = [candidate for candidate in nonchildren_candidates if (candidate is not None) and node_matches(candidate)]
     # print('>', best_candidate, new_candidates, candidates_matching)
 
-    if len(candidates_matching) == 1:
-      best_candidate = candidates_matching[0]
+    if (len(children_candidates_matching) == 1) and not nonchildren_candidates_matching:
+      parent_nodes.append(current_node)
+      current_node = children_candidates_matching[0]
+    elif (len(nonchildren_candidates_matching) == 1) and not children_candidates_matching:
+      current_node = nonchildren_candidates_matching[0]
     else:
-      return best_candidate
+      return AstTarget(current_node, parent_nodes)
