@@ -3,8 +3,9 @@ from dataclasses import dataclass
 import inspect
 import itertools
 from pathlib import Path
+from pprint import pprint
 import sys
-from types import TracebackType
+from types import CodeType, ModuleType, TracebackType
 from typing import Literal, Optional
 
 
@@ -12,9 +13,22 @@ from typing import Literal, Optional
 class ExceptionItem:
   message: str
 
+type AstNode = ast.Module | ast.expr | ast.stmt
+type ModuleKind = Literal['internal', 'std', 'lib', 'user']
+
+@dataclass(slots=True)
+class ModuleItem:
+  ast: Optional[ast.Module]
+  instance: Optional[ModuleType]
+  kind: ModuleKind
+  name: str
+  path: Path
+
 @dataclass(slots=True)
 class FrameItem:
-  pass
+  module: ModuleItem
+  node: Optional[AstNode]
+  reraise: bool
 
 
 def extract(start_exc: BaseException, /):
@@ -82,225 +96,161 @@ def extract(start_exc: BaseException, /):
         itertools.islice(frame_code.co_positions(), tb.tb_lasti // 2, None)
       ) if tb.tb_lasti >= 0 else None
 
-      extract_frame(
+      # print()
+      # print()
+      # print()
+      # print(frame_code)
+      # print(inspect.getmodule(frame_code))
+      # print()
+      # print()
+      # print()
+      # print(frame_code.co_name, inspect.getmodule(frame_code).__name__)
+
+      frames.append(extract_frame(
+        code=frame_code,
         frame_index=(tb_index + (1 if is_syntax_error else 0)),
         func_name=frame_code.co_qualname,
         raw_path=raw_path,
         positions=positions,
-      )
+      ))
+
+    pprint(frames)
+
+
+
+def extract_module_from_code(code: CodeType):
+  instance = inspect.getmodule(code)
+
+  if instance is None:
+    return extract_module_from_path(Path(code.co_filename))
+
+  name = instance.__name__
+  segments = name.split('.')
+  path = Path(inspect.getfile(instance))
+
+  # kind = 'internal' if module_name.startswith('<') else 'user'
+
+  if segments[0] in sys.builtin_module_names:
+    kind = 'std'
+  else:
+    try:
+      path.relative_to(Path.cwd())
+    except ValueError:
+      kind = 'lib'
+    else:
+      kind = 'user'
+
+  return ModuleItem(
+    ast=ast.parse(inspect.getsource(instance)),
+    instance=instance,
+    kind=kind,
+    name=name,
+    path=path,
+  )
+
+def extract_module_from_path(path: Path):
+  name = inspect.getmodulename(path)
+
+  if name is None:
+    return None
+
+  # try:
+  #   frame_contents = path.read_text()
+  # except OSError:
+  #   frame_contents = None
+
+  # Alternative
+  # frame_contents = inspect.getsourcefile(sys.modules[module_name])
+
+  return ModuleItem(
+    ast=None,
+    instance=None,
+    kind='user',
+    name=name,
+    path=path,
+  )
 
 
 def extract_frame(
+  code: Optional[CodeType],
   frame_index: int,
   func_name: str,
   raw_path: str,
   positions: Optional[tuple[Optional[int], Optional[int], Optional[int], Optional[int]]],
 ):
-  is_reraise = False
-  trace = None
+  # if raw_path[0] == '<':
+  #   kind = 'internal'
+  #   frame_path = None
+  #   module_name = raw_path
+  # else:
+  #   # Locate module
 
-  node = None # tmp
+  #   frame_path = Path(raw_path)
 
-  if raw_path[0] == '<':
-    kind = 'internal'
-    module_name = raw_path
-  else:
-    # Locate module
+  #   for sys_path in sys.path:
+  #     try:
+  #       rel_path = frame_path.relative_to(sys_path)
+  #     except ValueError:
+  #       pass
+  #     else:
+  #       *directories, file_name = rel_path.parts
 
-    frame_path = Path(raw_path)
+  #       module_path = directories + [file_name.removesuffix('.py')]
+  #       module_name = '.'.join(module_path)
 
-    for sys_path in sys.path:
-      try:
-        rel_path = frame_path.relative_to(sys_path)
-      except ValueError:
-        pass
-      else:
-        *directories, file_name = rel_path.parts
+  #       if module_path[0] in sys.stdlib_module_names:
+  #         kind = 'std'
+  #       else:
+  #         try:
+  #           frame_path.relative_to(Path.cwd())
+  #         except ValueError:
+  #           kind = 'lib'
+  #         else:
+  #           kind = 'user'
 
-        module_path = directories + [file_name.removesuffix('.py')]
-        module_name = '.'.join(module_path)
+  #       break
+  #   else:
+  #     kind = 'user'
+  #     module_name = raw_path
 
-        if module_path[0] in sys.stdlib_module_names:
-          kind = 'std'
-        else:
-          try:
-            frame_path.relative_to(Path.cwd())
-          except ValueError:
-            kind = 'lib'
-          else:
-            kind = 'user'
+  module_item = extract_module_from_code(code) if code is not None else None
 
-        break
+  # print(extract_module_from_code(code))
+  # print(extract_module_from_path(Path(code.co_filename)))
+  # print()
+
+
+  # Extract AST node
+
+  if (module_item is not None) and (module_item.ast is not None) and (positions is not None):
+    line_start, line_end, col_start, col_end = positions
+    # code_lines = frame_contents.splitlines()
+
+    if (line_start is not None) and (line_end is not None):
+      node = identify_node(module_item.ast, line_start, line_end, col_start, col_end)
     else:
-      kind = 'user'
-      module_name = raw_path
+      node = None
+  else:
+    node = None
+
+  # print('Frame')
+  # print(f'{kind=} {module_name=}')
+  # print('Node:', ast.unparse(node))
+  # print()
+
+  return FrameItem(
+    module=module_item,
+    node=node,
+    reraise=((frame_index > 0) and isinstance(node, ast.Raise)),
+  )
 
 
-    # Extract AST node
-
-    if positions is not None:
-      try:
-        frame_contents = frame_path.read_text()
-      except OSError:
-        frame_contents = None
-
-      # Alternative
-      # frame_contents = inspect.getsourcefile(sys.modules[str(frame_path)])
-
-      if frame_contents is not None:
-        # Obtain target line range
-
-        line_start, line_end, col_start, col_end = positions
-        code_lines = frame_contents.splitlines()
-
-        # Line numbers start at 1
-        # assert (line_start is not None) and (line_end is not None) and (col_start is not None) and (col_end is not None)
-
-        try:
-          mod = ast.parse(frame_contents)
-        except:
-          pass
-        else:
-          if (line_start is not None) and (line_end is not None):
-            node = identify_node(mod, line_start, line_end, col_start, col_end)
-          else:
-            node = None
-
-
-    # if (frame_index == 0) or (
-    #   (kind == 'user') and
-    #   (frame_index < 3)
-    # ):
-    #   # Produce trace
-
-    #   if positions is not None:
-    #     try:
-    #       frame_contents = frame_path.read_text()
-    #     except OSError:
-    #       frame_contents = None
-
-    #     if frame_contents is not None:
-    #       # Obtain target line range
-
-    #       line_start, line_end, col_start, col_end = positions
-    #       code_lines = frame_contents.splitlines()
-
-    #       # Line numbers start at 1
-    #       assert (line_start is not None) and (line_end is not None) and (col_start is not None) and (col_end is not None)
-
-
-    #       # Detect re-raise
-
-    #       if frame_index > 0:
-    #         mod = ast.parse(frame_contents)
-    #         node = identify_node(mod, line_start, line_end, col_start, col_end)
-    #         is_reraise = isinstance(node, ast.Raise)
-
-
-    #       # Compute target line range
-
-    #       # Ensure there are no more than max_total_lines target lines
-    #       if line_end - line_start + 1 > options.max_target_lines:
-    #         # The "more lines" message always mentions at least 2 lines
-    #         line_end_cut = line_start + options.max_target_lines - 2
-    #       else:
-    #         line_end_cut = line_end
-
-    #       # Old version
-    #       # line_end_cut = line_start + min(line_end - line_start, max_target_lines - 1)
-
-
-    #       # Compute context line range
-
-    #       context_line_start = max(line_start - options.max_context_lines_before, 1)
-    #       context_line_end = min(line_end + options.max_context_lines_after, len(code_lines))
-
-    #       while (context_line_start < line_start) and (not (context_line := code_lines[context_line_start - 1]) or context_line.isspace()):
-    #         context_line_start += 1
-
-    #       # This must be done beforehand in order to calculate the maximum line width
-    #       while (context_line_end > line_end) and (not (context_line := code_lines[context_line_end - 1]) or context_line.isspace()):
-    #         context_line_end -= 1
-
-
-    #       # Compute line parameters
-
-    #       # Also includes cut target lines
-    #       displayed_lines = code_lines[(context_line_start - 1):context_line_end]
-    #       common_indentation = get_common_indentation(displayed_lines) if options.remove_common_indentation else 0
-
-    #       line_number_width = get_integer_width(context_line_end)
-
-
-    #       # Display context before target
-
-    #       indent = ' ' * 4
-    #       trace = f''
-
-    #       for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
-    #         line_number = context_line_start + rel_line_index
-    #         trace += f'{prefix}{escape.bright_black}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}{escape.reset}\n'
-
-
-    #       # Display target
-
-    #       target_lines = code_lines[(line_start - 1):line_end_cut]
-
-    #       for rel_line_index, line in enumerate(target_lines):
-    #         line_number = line_start + rel_line_index
-    #         line_indent = (get_line_indentation(line) if options.skip_indentation_highlight else 0)
-
-    #         if line_number == line_start:
-    #           anchor_start = col_start
-
-    #           if line_start == line_end:
-    #             anchor_end = col_end
-    #           else:
-    #             anchor_end = len(line) - col_start
-    #         elif line_number == line_end:
-    #           anchor_start = line_indent
-    #           anchor_end = col_end
-    #         else:
-    #           anchor_start = line_indent
-    #           anchor_end = len(line)
-
-    #         anchor_start_sub = max(anchor_start - common_indentation, 0)
-    #         anchor_end_sub = max(anchor_end - common_indentation, 0)
-
-    #         trace += f'{prefix}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
-    #         trace += prefix + indent + ' ' * (line_number_width + 1 + anchor_start_sub)
-    #         trace += escape.red
-    #         trace += '^' * (anchor_end_sub - anchor_start_sub)
-    #         trace += escape.reset + '\n'
-
-    #       if line_end_cut != line_end:
-    #         trace += f'{prefix}{indent}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]\n'
-
-
-    #       # Display context after target
-
-    #       for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
-    #         line_number = line_end + rel_line_index + 1
-    #         trace += f'{prefix}{escape.bright_black}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}{escape.reset}\n'
-
-    #       trace += f'{prefix}\n'
-
-  # color = escape.bright_black if (kind != 'user') and (frame_index != 0) else ''
-
-  # return f'{prefix}{color}  at {escape.underline if trace is not None else ''}{func_name}{escape.reset}'\
-  #   + f'{color} ({module_name}{f':{positions[0]}' if (kind != 'internal') and (positions is not None) and (positions[0] is not None) else ''})'\
-  #   + f'{' [re-raise]' if is_reraise else ''}{escape.reset}\n' + (trace or '')
-
-  print('Frame')
-  print(f'{kind=} {module_name=}')
-  print('Node:', ast.unparse(node))
-  print()
-
-
-def identify_node(mod: ast.Module, line_start: int, line_end: int, col_start: Optional[int], col_end: Optional[int]) -> ast.Module | ast.expr | ast.stmt:
+def identify_node(mod: ast.Module, line_start: int, line_end: int, col_start: Optional[int], col_end: Optional[int]) -> AstNode:
   best_candidate: ast.Module | ast.expr | ast.stmt = mod
 
   def node_matches(node: ast.expr | ast.stmt):
+    # Line numbers start at 1
+
     if node.end_lineno is None:
       return False
 
