@@ -1,19 +1,19 @@
 """
-Exception formatter that produces readable stack traces.
+Exception formatter that produces readable stack traces
 """
 
 __version__ = '0.1.0'
 
 
-import ast
 from dataclasses import dataclass
+from pathlib import Path
+from types import TracebackType
+from typing import IO, Literal, Optional
+import ast
 import itertools
 import math
 import os
 import sys
-from pathlib import Path
-from types import TracebackType
-from typing import IO, Literal, Optional
 
 
 # TODO: Better checks
@@ -35,7 +35,7 @@ class EscapeSequences:
   underline: str
 
   def __init__(self, file: IO, *, disable_color: bool = False):
-    if not (disable_color or not file.isatty() or os.environ.get('NO_COLOR')):
+    if (not disable_color) and (not os.environ.get('NO_COLOR')) and (file.isatty() or is_ipython()):
       self.bright_black = '\033[90m'
       self.italic = '\033[3m'
       self.red = '\033[31m'
@@ -48,6 +48,15 @@ class EscapeSequences:
       self.reset = ''
       self.underline = ''
 
+
+# See: https://stackoverflow.com/questions/15411967/how-can-i-check-if-code-is-executed-in-the-ipython-notebook
+def is_ipython():
+  try:
+    get_ipython() # type: ignore
+  except NameError:
+    return False
+  else:
+    return True
 
 def get_integer_width(x: int, /):
   return max(math.ceil(math.log10(x + 1)), 1)
@@ -388,15 +397,14 @@ def write_exc_core(start_exc: BaseException, file: IO[str], *, escape: EscapeSeq
 
 
 def dump(
-    start_exc: BaseException,
-    /,
-    file: IO[str],
-    *,
-    disable_color: bool = False,
-    options: Options = Options()
-  ):
+  start_exc: BaseException,
+  /,
+  file: IO[str],
+  *,
+  disable_color: bool = False,
+  options: Options = Options()
+):
   escape = EscapeSequences(file, disable_color=disable_color)
-
   write_exc(start_exc, file, escape=escape, options=options, prefix='')
 
 
