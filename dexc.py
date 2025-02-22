@@ -8,12 +8,15 @@ __version__ = '0.1.0'
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import IO, Literal, Optional
+from typing import IO, TYPE_CHECKING, Literal, Optional
 import ast
 import itertools
 import math
 import os
 import sys
+
+if TYPE_CHECKING:
+  from IPython.core.interactiveshell import InteractiveShell
 
 
 # TODO: Better checks
@@ -24,6 +27,9 @@ import sys
 # TODO: Better highlight re-raises
 # TODO: Handle multiprocessing.pool.RemoteTraceback which currently is text
 # TODO: Better highlighting using ast data (e.g. only highlight first line of for loop)
+# TODO: Check on Google Colab
+# TODO: Remove path of files in temporary directory
+# TODO: Add option to only handle certain exception types
 
 
 @dataclass(slots=True)
@@ -35,7 +41,7 @@ class EscapeSequences:
   underline: str
 
   def __init__(self, file: IO, *, disable_color: bool = False):
-    if (not disable_color) and (not os.environ.get('NO_COLOR')) and (file.isatty() or is_ipython()):
+    if (not disable_color) and (not os.environ.get('NO_COLOR')) and (file.isatty() or (get_ipython() is not None)):
       self.bright_black = '\033[90m'
       self.italic = '\033[3m'
       self.red = '\033[31m'
@@ -50,13 +56,12 @@ class EscapeSequences:
 
 
 # See: https://stackoverflow.com/questions/15411967/how-can-i-check-if-code-is-executed-in-the-ipython-notebook
-def is_ipython():
-  try:
-    get_ipython() # type: ignore
-  except NameError:
-    return False
-  else:
-    return True
+def get_ipython():
+  if not 'IPython' in sys.modules:
+    return None
+
+  from IPython.core.getipython import get_ipython
+  return get_ipython()
 
 def get_integer_width(x: int, /):
   return max(math.ceil(math.log10(x + 1)), 1)
@@ -408,7 +413,7 @@ def dump(
   write_exc(start_exc, file, escape=escape, options=options, prefix='')
 
 
-def install(file: IO[str] = sys.stderr):
+def install(*, file: IO[str] = sys.stderr):
   def except_hook(start_exc_type: type[BaseException], start_exc: BaseException, start_tb: TracebackType):
     dump(start_exc, file)
 
@@ -417,6 +422,15 @@ def install(file: IO[str] = sys.stderr):
 
   sys.excepthook = except_hook
   sys.unraisablehook = unraisable_hook
+
+
+  ipython = get_ipython()
+
+  if ipython is not None:
+    def ipython_hook(self: 'InteractiveShell', etype: type[BaseException], value: BaseException, tb: TracebackType, tb_offset = None):
+      dump(value, file)
+
+    ipython.set_custom_exc((BaseException, ), ipython_hook)
 
 
 __all__ = [
