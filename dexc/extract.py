@@ -14,10 +14,10 @@ from .util import try_read_text
 
 type AstNode = ast.Module | ast.expr | ast.stmt
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class AstTarget:
   node: AstNode
-  parents: Sequence[AstNode]
+  parents: Sequence[AstNode] = field(hash=False)
 
 
 type ModuleKind = Literal['internal', 'std', 'lib', 'user']
@@ -31,7 +31,7 @@ class ModuleItem:
   path: Path
   source: Optional[str] = field(repr=False)
 
-@dataclass(eq=True, frozen=True, slots=True)
+@dataclass(frozen=True, slots=True)
 class FrameArea:
   line_start: Optional[int]
   line_end: Optional[int]
