@@ -234,79 +234,6 @@ def extract_module_from_path(path: Path):
   )
 
 
-# def extract_frame(
-#   code: Optional[CodeType],
-#   tb: TracebackType,
-#   frame_index: int,
-#   positions: Optional[tuple[Optional[int], Optional[int], Optional[int], Optional[int]]],
-# ):
-#   # if raw_path[0] == '<':
-#   #   kind = 'internal'
-#   #   frame_path = None
-#   #   module_name = raw_path
-#   # else:
-#   #   # Locate module
-
-#   #   frame_path = Path(raw_path)
-
-#   #   for sys_path in sys.path:
-#   #     try:
-#   #       rel_path = frame_path.relative_to(sys_path)
-#   #     except ValueError:
-#   #       pass
-#   #     else:
-#   #       *directories, file_name = rel_path.parts
-
-#   #       module_path = directories + [file_name.removesuffix('.py')]
-#   #       module_name = '.'.join(module_path)
-
-#   #       if module_path[0] in sys.stdlib_module_names:
-#   #         kind = 'std'
-#   #       else:
-#   #         try:
-#   #           frame_path.relative_to(Path.cwd())
-#   #         except ValueError:
-#   #           kind = 'lib'
-#   #         else:
-#   #           kind = 'user'
-
-#   #       break
-#   #   else:
-#   #     kind = 'user'
-#   #     module_name = raw_path
-
-#   module_item = extract_module_from_code(code) if code is not None else None
-
-#   # print(extract_module_from_code(code))
-#   # print(extract_module_from_path(Path(code.co_filename)))
-#   # print()
-
-
-#   # Extract AST node
-
-#   if (module_item is not None) and (module_item.ast is not None) and (positions is not None):
-#     line_start, line_end, col_start, col_end = positions
-#     # code_lines = frame_contents.splitlines()
-
-#     if (line_start is not None) and (line_end is not None):
-#       target = identify_node(module_item.ast, line_start, line_end, col_start, col_end)
-#     else:
-#       target = None
-#   else:
-#     target = None
-
-#   # print('Frame')
-#   # print(f'{kind=} {module_name=}')
-#   # print('Node:', ast.unparse(target.node))
-#   # print()
-
-#   return FrameItem(
-#     module=module_item,
-#     target=target,
-#     reraise=((frame_index > 0) and isinstance(target, ast.Raise)),
-#   )
-
-
 def identify_node(module: ast.Module, area: FrameArea):
   line_start = area.line_start
   line_end = area.line_end
@@ -370,12 +297,9 @@ def identify_node(module: ast.Module, area: FrameArea):
       case ast.AsyncWith(items, body, type_comment) | ast.With(items, body, type_comment):
         children_candidates += (item.context_expr for item in items)
         children_candidates += body
-      case _:
-        return AstTarget(current_node, parent_nodes)
 
     children_candidates_matching = [candidate for candidate in children_candidates if (candidate is not None) and node_matches(candidate)]
     nonchildren_candidates_matching = [candidate for candidate in nonchildren_candidates if (candidate is not None) and node_matches(candidate)]
-    # print('>', best_candidate, new_candidates, candidates_matching)
 
     if (len(children_candidates_matching) == 1) and not nonchildren_candidates_matching:
       parent_nodes.append(current_node)

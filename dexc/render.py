@@ -1,24 +1,15 @@
 import ast
-import itertools
 import math
 import os
 import sys
 from dataclasses import dataclass
-from pprint import pprint
-from typing import IO, Optional
+from typing import IO
 
 from .compression import compress
 from .extract import ExceptionChain, ExceptionItem, extract
+from .options import Options
 from .util import format_path
-
-
-# See: https://stackoverflow.com/questions/15411967/how-can-i-check-if-code-is-executed-in-the-ipython-notebook
-def get_ipython():
-  if not 'IPython' in sys.modules:
-    return None
-
-  from IPython.core.getipython import get_ipython
-  return get_ipython()
+from .vendor import get_ipython
 
 
 def get_integer_width(x: int, /):
@@ -73,18 +64,6 @@ class Symbols:
       self.color_underline = ''
 
 
-@dataclass(kw_only=True, slots=True)
-class Options:
-  ascii_only: bool = False
-  chain_origin_on_top: bool = False
-  colorize: Optional[bool] = True
-  inner_frame_on_top: bool = False
-  max_context_lines_after: int = 2
-  max_context_lines_before: int = 3
-  max_target_lines: int = 5
-  skip_indentation_highlight: bool = True
-  remove_common_indentation: bool = True
-
 
 def render(chain: ExceptionChain, file: IO[str], options: Options, *, _prefix: str = ''):
   colorize = (options.colorize == True) or (
@@ -97,13 +76,15 @@ def render(chain: ExceptionChain, file: IO[str], options: Options, *, _prefix: s
 
   for item, relation in zip(chain.items[::-1], [None, *chain.relations[::-1]]) if options.chain_origin_on_top else zip(chain.items, [None, *chain.relations]):
     if relation is not None:
-      file.write(f'{_prefix}')
+      file.write(f'{_prefix}\n{_prefix}{symbols.color_italic}[')
 
       match relation:
         case 'cause':
-          file.write(f'{symbols.color_italic}[{'Causing' if options.chain_origin_on_top else 'Caused by'}]{symbols.color_reset}\n{_prefix}\n{_prefix}')
+          file.write('Causing' if options.chain_origin_on_top else 'Caused by')
         case 'context':
-          file.write(f'{symbols.color_italic}[{'Raising while handling' if options.chain_origin_on_top else 'Raised while handling'}]{symbols.color_reset}\n{_prefix}\n{_prefix}')
+          file.write('Raising while handling' if options.chain_origin_on_top else 'Raised while handling')
+
+      file.write(f']{symbols.color_reset}\n{_prefix}\n{_prefix}')
 
     file.write(f'{type(item.instance).__name__}: {item.instance}\n')
     render_item(item, file, symbols, options, prefix=f'{_prefix}{symbols.box_vertical + ' ' if item.children else ''}')
@@ -124,17 +105,19 @@ def render_item(item: ExceptionItem, file: IO[str], symbols: Symbols, options: O
   compressed = compress(frames, key=(lambda x: x[1]))
   # cum_frame_count = [0, *itertools.accumulate(len(atom.keys) for atom in compressed.atoms[:-1])]
 
-  for atom_index, atom in enumerate(compressed.atoms):
-    if atom_index > 0:
-      file.write(f'{prefix}\n')
+  newline_required = False
 
+  for atom_index, atom in enumerate(compressed.atoms):
     atom_correct_index = atom_index if options.inner_frame_on_top else len(compressed.atoms) - atom_index - 1
 
-    if (atom.repeat > 1) and (len(atom.keys) > 1):
+    repeat_box = (atom.repeat > 1) and (len(atom.keys) > 1)
+    frame_prefix = prefix + (f'{symbols.box_vertical} ' if repeat_box else '')
+
+    if repeat_box or newline_required:
+      file.write(f'{prefix}\n')
+
+    if repeat_box:
       file.write(f'{symbols.box_down_right}{symbols.box_horizontal * 2} Repeated {atom.repeat} times {symbols.box_horizontal * 2}\n')
-      frame_prefix = f'{prefix}{symbols.box_vertical} '
-    else:
-      frame_prefix = prefix
 
     for frame_index, frame in atom.realization[:len(atom.keys)]:
       line_start = frame.area.line_start
@@ -238,15 +221,15 @@ def render_item(item: ExceptionItem, file: IO[str], symbols: Symbols, options: O
         for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
           line_number = line_end + rel_line_index + 1
           trace += f'{frame_prefix}{symbols.color_bright_black}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}{symbols.color_reset}\n'
-
-        # trace += f'{frame_prefix}\n'
       else:
         trace = None
+
+      newline_required = trace is not None
 
       color = symbols.color_bright_black if (frame.module.kind != 'user') and (frame_index != 0) else ''
 
       if frame.target is not None:
-        for node in [frame.target.node, *frame.target.parents]:
+        for node in [frame.target.node, *frame.target.parents[::-1]]:
           match node:
             case ast.FunctionDef(name=name):
               target_name = f'{color}at function {symbols.color_underline if trace is not None else ''}{name}{symbols.color_reset} '
@@ -254,11 +237,13 @@ def render_item(item: ExceptionItem, file: IO[str], symbols: Symbols, options: O
             case ast.ClassDef(name=name):
               target_name = f'{color}at class {symbols.color_underline if trace is not None else ''}{name}{symbols.color_reset} '
               break
+            case ast.Module():
+              target_name = f'{color}at module{symbols.color_reset} '
+              break
         else:
           target_name = ''
       else:
         target_name = ''
-
 
       file.write(f'{frame_prefix}{target_name}')
       file.write(f'{color}in {format_path(frame.module.path)}{f':{line_start}' if (frame.module.kind != 'internal') and line_start is not None else ''} as {frame.module.name}')
@@ -271,54 +256,6 @@ def render_item(item: ExceptionItem, file: IO[str], symbols: Symbols, options: O
 
       file.write(f'{symbols.color_reset}\n{trace or ''}')
 
-    if (atom.repeat > 1) and (len(atom.keys) > 1):
+    if repeat_box:
       file.write(f'{symbols.box_up_right}{symbols.box_horizontal * 3}\n')
-
-    # if (atom.repeat > 1) and (len(atom.keys) > 1):
-    #   file.write(f'{escape.italic}[Last {len(atom.keys)} frames repeated {atom.repeat - 1} more times]{escape.reset}\n{prefix}\n')
-
-
-if __name__ == '__main__':
-  def err(msg: str):
-    class A:
-      raise Exception(msg)
-
-  def ge(msg: str):
-    try:
-      try:
-        err(msg + ' pre')
-      except Exception as e:
-        raise Exception(msg + ' post') from e
-    except Exception as e:
-      return e
-
-  def foo(x: int):
-    if x == 0:
-      raise Exception('x is zero')
-    else:
-      bar(x - 0)
-
-  def bar(x):
-    foo(x)
-
-
-  sys.setrecursionlimit(50)
-
-  try:
-    bar(18)
-
-    raise ExceptionGroup('foo', [
-      ge('bar'),
-      ExceptionGroup('baz', [
-        ge('qux'),
-        ge('quux'),
-      ]),
-      ge('bar'),
-    ])
-  except Exception as e:
-    chain = extract(e)
-
-  sys.setrecursionlimit(1000)
-
-  # pprint(chain)
-  render(chain, sys.stderr, Options())
+      newline_required = True
