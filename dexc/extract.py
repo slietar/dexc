@@ -9,6 +9,8 @@ from pprint import pprint
 from types import CodeType, ModuleType, TracebackType
 from typing import Literal, Optional, Sequence
 
+from .util import try_read_text
+
 
 type AstNode = ast.Module | ast.expr | ast.stmt
 
@@ -27,9 +29,18 @@ class ModuleItem:
   kind: ModuleKind
   name: str
   path: Path
+  source: Optional[str]
+
+@dataclass(eq=True, frozen=True, slots=True)
+class FrameArea:
+  line_start: Optional[int]
+  line_end: Optional[int]
+  col_start: Optional[int]
+  col_end: Optional[int]
 
 @dataclass(eq=True, frozen=True, slots=True)
 class FrameItem:
+  area: FrameArea
   module: ModuleItem
   target: Optional[AstTarget]
   reraise: bool
@@ -46,7 +57,7 @@ class ExceptionItem:
 
 @dataclass(slots=True)
 class ExceptionChain:
-  excs: Sequence[ExceptionItem]
+  items: Sequence[ExceptionItem]
 
 
 def extract(start_exc: BaseException, /):
@@ -123,13 +134,34 @@ def extract_exc_frames(exc: BaseException, /):
       itertools.islice(frame_code.co_positions(), tb.tb_lasti // 2, None)
     ) if tb.tb_lasti >= 0 else None
 
-    frame = extract_frame(
-      code=frame_code,
-      frame_index=(tb_index + (1 if is_syntax_error else 0)),
-      func_name=frame_code.co_qualname,
-      raw_path=raw_path,
-      positions=positions,
+    area = FrameArea(
+      positions[0] if positions is not None else None,
+      positions[1] if positions is not None else None,
+      positions[2] if positions is not None else None,
+      positions[3] if positions is not None else None,
     )
+
+    module_item = extract_module_from_code(frame_code) if frame_code is not None else None
+
+    if (module_item is not None) and (module_item.ast is not None) and (positions is not None):
+      target = identify_node(module_item.ast, area)
+    else:
+      target = None
+
+    frame = FrameItem(
+      area=area,
+      module=module_item,
+      target=target,
+      reraise=((tb_index > 0) and isinstance(target, ast.Raise)),
+    )
+
+    # frame = extract_frame(
+    #   code=frame_code,
+    #   frame_index=(tb_index + (1 if is_syntax_error else 0)),
+    #   func_name=frame_code.co_qualname,
+    #   raw_path=raw_path,
+    #   positions=positions,
+    # )
 
     frames.append(frame)
 
@@ -163,12 +195,15 @@ def extract_module_from_module(instance: ModuleType):
     else:
       kind = 'user'
 
+  source = inspect.getsource(instance)
+
   return ModuleItem(
-    ast=ast.parse(inspect.getsource(instance)),
+    ast=ast.parse(source),
     instance=instance,
     kind=kind,
     name=name,
     path=path,
+    source=source,
   )
 
 @functools.cache
@@ -192,84 +227,90 @@ def extract_module_from_path(path: Path):
     kind='user',
     name=name,
     path=path,
+    source=try_read_text(path),
   )
 
 
-def extract_frame(
-  code: Optional[CodeType],
-  frame_index: int,
-  func_name: str,
-  raw_path: str,
-  positions: Optional[tuple[Optional[int], Optional[int], Optional[int], Optional[int]]],
-):
-  # if raw_path[0] == '<':
-  #   kind = 'internal'
-  #   frame_path = None
-  #   module_name = raw_path
-  # else:
-  #   # Locate module
+# def extract_frame(
+#   code: Optional[CodeType],
+#   tb: TracebackType,
+#   frame_index: int,
+#   positions: Optional[tuple[Optional[int], Optional[int], Optional[int], Optional[int]]],
+# ):
+#   # if raw_path[0] == '<':
+#   #   kind = 'internal'
+#   #   frame_path = None
+#   #   module_name = raw_path
+#   # else:
+#   #   # Locate module
 
-  #   frame_path = Path(raw_path)
+#   #   frame_path = Path(raw_path)
 
-  #   for sys_path in sys.path:
-  #     try:
-  #       rel_path = frame_path.relative_to(sys_path)
-  #     except ValueError:
-  #       pass
-  #     else:
-  #       *directories, file_name = rel_path.parts
+#   #   for sys_path in sys.path:
+#   #     try:
+#   #       rel_path = frame_path.relative_to(sys_path)
+#   #     except ValueError:
+#   #       pass
+#   #     else:
+#   #       *directories, file_name = rel_path.parts
 
-  #       module_path = directories + [file_name.removesuffix('.py')]
-  #       module_name = '.'.join(module_path)
+#   #       module_path = directories + [file_name.removesuffix('.py')]
+#   #       module_name = '.'.join(module_path)
 
-  #       if module_path[0] in sys.stdlib_module_names:
-  #         kind = 'std'
-  #       else:
-  #         try:
-  #           frame_path.relative_to(Path.cwd())
-  #         except ValueError:
-  #           kind = 'lib'
-  #         else:
-  #           kind = 'user'
+#   #       if module_path[0] in sys.stdlib_module_names:
+#   #         kind = 'std'
+#   #       else:
+#   #         try:
+#   #           frame_path.relative_to(Path.cwd())
+#   #         except ValueError:
+#   #           kind = 'lib'
+#   #         else:
+#   #           kind = 'user'
 
-  #       break
-  #   else:
-  #     kind = 'user'
-  #     module_name = raw_path
+#   #       break
+#   #   else:
+#   #     kind = 'user'
+#   #     module_name = raw_path
 
-  module_item = extract_module_from_code(code) if code is not None else None
+#   module_item = extract_module_from_code(code) if code is not None else None
 
-  # print(extract_module_from_code(code))
-  # print(extract_module_from_path(Path(code.co_filename)))
-  # print()
-
-
-  # Extract AST node
-
-  if (module_item is not None) and (module_item.ast is not None) and (positions is not None):
-    line_start, line_end, col_start, col_end = positions
-    # code_lines = frame_contents.splitlines()
-
-    if (line_start is not None) and (line_end is not None):
-      target = identify_node(module_item.ast, line_start, line_end, col_start, col_end)
-    else:
-      target = None
-  else:
-    target = None
-
-  # print('Frame')
-  # print(f'{kind=} {module_name=}')
-  # print('Node:', ast.unparse(target.node))
-  # print()
-
-  return FrameItem(
-    module=module_item,
-    target=target,
-    reraise=((frame_index > 0) and isinstance(target, ast.Raise)),
-  )
+#   # print(extract_module_from_code(code))
+#   # print(extract_module_from_path(Path(code.co_filename)))
+#   # print()
 
 
-def identify_node(module: ast.Module, line_start: int, line_end: int, col_start: Optional[int], col_end: Optional[int]):
+#   # Extract AST node
+
+#   if (module_item is not None) and (module_item.ast is not None) and (positions is not None):
+#     line_start, line_end, col_start, col_end = positions
+#     # code_lines = frame_contents.splitlines()
+
+#     if (line_start is not None) and (line_end is not None):
+#       target = identify_node(module_item.ast, line_start, line_end, col_start, col_end)
+#     else:
+#       target = None
+#   else:
+#     target = None
+
+#   # print('Frame')
+#   # print(f'{kind=} {module_name=}')
+#   # print('Node:', ast.unparse(target.node))
+#   # print()
+
+#   return FrameItem(
+#     module=module_item,
+#     target=target,
+#     reraise=((frame_index > 0) and isinstance(target, ast.Raise)),
+#   )
+
+
+def identify_node(module: ast.Module, area: FrameArea):
+  line_start = area.line_start
+  line_end = area.line_end
+
+  if (line_start is None) or (line_end is None):
+    return None
+
   def node_matches(node: ast.expr | ast.stmt):
     # Line numbers start at 1 and both ends are inclusive, for both AST nodes and exceptions
 
@@ -282,11 +323,11 @@ def identify_node(module: ast.Module, line_start: int, line_end: int, col_start:
     if not ((node.lineno <= line_start) and (node.end_lineno >= line_end)):
       return False
 
-    if (col_start is not None) and (node.lineno == line_start) and (node.col_offset > col_start):
+    if (area.col_start is not None) and (node.lineno == line_start) and (node.col_offset > area.col_start):
       # print('>', node.col_offset, col_start)
       return False
 
-    if (col_end is not None) and (node.end_col_offset is not None) and (node.end_lineno == line_end) and (node.end_col_offset < col_end):
+    if (area.col_end is not None) and (node.end_col_offset is not None) and (node.end_lineno == line_end) and (node.end_col_offset < area.col_end):
       # print('>', node, node.end_lineno, line_end, node.end_col_offset, col_end)
       return False
 
