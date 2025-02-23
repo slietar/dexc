@@ -3,7 +3,7 @@ import functools
 import inspect
 import itertools
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from pprint import pprint
 from types import CodeType, ModuleType, TracebackType
@@ -29,7 +29,7 @@ class ModuleItem:
   kind: ModuleKind
   name: str
   path: Path
-  source: Optional[str]
+  source: Optional[str] = field(repr=False)
 
 @dataclass(eq=True, frozen=True, slots=True)
 class FrameArea:
@@ -46,18 +46,18 @@ class FrameItem:
   reraise: bool
 
 
-type ExceptionKind = Literal['base', 'cause', 'context']
+type ExceptionChainRelation = Literal['cause', 'context']
 
 @dataclass(slots=True)
 class ExceptionItem:
   children: 'Sequence[ExceptionChain]'
   frames: Sequence[FrameItem]
   instance: BaseException
-  kind: ExceptionKind
 
 @dataclass(slots=True)
 class ExceptionChain:
   items: Sequence[ExceptionItem]
+  relations: Sequence[ExceptionChainRelation]
 
 
 def extract(start_exc: BaseException, /):
@@ -66,28 +66,31 @@ def extract(start_exc: BaseException, /):
 def extract_exc_chain(start_exc: BaseException, /):
   current_exc = start_exc
 
-  excs = list[tuple[BaseException, ExceptionKind]]()
-  excs.append((current_exc, 'base'))
+  excs = list[BaseException]()
+  excs.append(current_exc)
+
+  relations = list[ExceptionChainRelation]()
 
   while True:
     if current_exc.__cause__:
       current_exc = current_exc.__cause__
-      excs.append((current_exc, 'cause'))
+      excs.append(current_exc)
+      relations.append('cause')
     elif current_exc.__context__:
       current_exc = current_exc.__context__
-      excs.append((current_exc, 'context'))
+      excs.append(current_exc)
+      relations.append('context')
     else:
       break
 
-  def map_exc(exc: BaseException, exc_kind: ExceptionKind):
+  def map_exc(exc: BaseException):
     return ExceptionItem(
       children=([extract_exc_chain(exc) for exc in exc.exceptions] if isinstance(exc, BaseExceptionGroup) else []),
       frames=extract_exc_frames(exc),
       instance=exc,
-      kind=exc_kind,
     )
 
-  return ExceptionChain([map_exc(exc, exc_kind) for exc, exc_kind in excs])
+  return ExceptionChain([map_exc(exc) for exc in excs], relations=relations)
 
 
 
@@ -347,7 +350,7 @@ def identify_node(module: ast.Module, area: FrameArea):
       case ast.ClassDef(name, bases, keywords, body, decorator_list, type_params):
         children_candidates += body
         children_candidates += decorator_list
-        nonchildren_candidates += bases
+        children_candidates += bases
       case ast.Expr(value):
         nonchildren_candidates.append(value)
       case ast.AsyncFunctionDef(body=body) | ast.FunctionDef(body=body):

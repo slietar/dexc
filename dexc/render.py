@@ -1,3 +1,4 @@
+import ast
 import math
 import os
 import sys
@@ -55,6 +56,8 @@ class EscapeSequences:
 @dataclass(kw_only=True, slots=True)
 class Options:
   ascii_only: bool = False
+  chain_origin_on_top: bool = False
+  inner_frame_on_top: bool = True
   max_context_lines_after: int = 2
   max_context_lines_before: int = 3
   max_target_lines: int = 5
@@ -69,7 +72,16 @@ def render(chain: ExceptionChain, file: IO[str], options: Options, *, _prefix: s
   tree_branch = '+-- ' if options.ascii_only else '├── '
   tree_line = '| ' if options.ascii_only else '│ '
 
-  for item_index, item in enumerate(chain.items):
+  for item, relation in zip(chain.items[::-1], [None, *chain.relations[::-1]]) if options.chain_origin_on_top else zip(chain.items, [None, *chain.relations]):
+    if relation is not None:
+      file.write(f'{_prefix}')
+
+      match relation:
+        case 'cause':
+          file.write(f'{escape.italic}[{'Causing' if options.chain_origin_on_top else 'Caused by'}]{escape.reset}\n{_prefix}\n{_prefix}')
+        case 'context':
+          file.write(f'{escape.italic}[{'Raising while handling' if options.chain_origin_on_top else 'Raised while handling'}]{escape.reset}\n{_prefix}\n{_prefix}')
+
     file.write(f'{type(item.instance).__name__}: {item.instance}\n')
     render_item(item, file, escape, options, prefix=(_prefix + (tree_line if item.children else '')))
 
@@ -79,17 +91,14 @@ def render(chain: ExceptionChain, file: IO[str], options: Options, *, _prefix: s
       file.write(f'{_prefix}{tree_corner if is_child_last else tree_branch}')
       render(child, file, options, _prefix=f'{_prefix}{'  ' if is_child_last else tree_line}  ')
 
-    match item.kind:
-      case 'base':
-        pass
-      case 'cause':
-        file.write(f'{_prefix}\n{escape.italic}[Caused by]{escape.reset}\n{_prefix}\n')
-      case 'context':
-        file.write(f'{_prefix}\n{escape.italic}[Raised while handling]{escape.reset}\n{_prefix}\n')
-
 
 def render_item(item: ExceptionItem, file: IO[str], escape: EscapeSequences, options: Options, *, prefix: str):
-  for frame_index, frame in enumerate(item.frames):
+  iterator = enumerate(item.frames)
+
+  if not options.inner_frame_on_top:
+    iterator = reversed(list(iterator))
+
+  for frame_index, frame in iterator:
     line_start = frame.area.line_start
     line_end = frame.area.line_end
     col_start = frame.area.col_start
@@ -143,8 +152,8 @@ def render_item(item: ExceptionItem, file: IO[str], escape: EscapeSequences, opt
 
       # Display context before target
 
-      indent = ' ' * 2
-      trace = f''
+      indent = '  '
+      trace = ''
 
       for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
         line_number = context_line_start + rel_line_index
@@ -157,7 +166,7 @@ def render_item(item: ExceptionItem, file: IO[str], escape: EscapeSequences, opt
 
       for rel_line_index, line in enumerate(target_lines):
         line_number = line_start + rel_line_index
-        line_indent = (get_line_indentation(line) if options.skip_indentation_highlight else 0)
+        line_indent = get_line_indentation(line) if options.skip_indentation_highlight else 0
 
         if line_number == line_start:
           anchor_start = col_start
@@ -165,7 +174,7 @@ def render_item(item: ExceptionItem, file: IO[str], escape: EscapeSequences, opt
           if line_start == line_end:
             anchor_end = col_end
           else:
-            anchor_end = len(line) - col_start
+            anchor_end = len(line)
         elif line_number == line_end:
           anchor_start = line_indent
           anchor_end = col_end
@@ -198,29 +207,54 @@ def render_item(item: ExceptionItem, file: IO[str], escape: EscapeSequences, opt
 
     color = escape.bright_black if (frame.module.kind != 'user') and (frame_index != 0) else ''
 
-    frame_formatted = f'{prefix}{color}at {escape.underline if trace is not None else ''}{'func name'}{escape.reset}'\
-      + f'{color} in {format_path(frame.module.path)}{f':{line_start}' if (frame.module.kind != 'internal') and line_start is not None else ''} as {frame.module.name}'\
+    if frame.target is not None:
+      # target_name = frame.target.name
+      for node in [frame.target.node, *frame.target.parents]:
+        match node:
+          case ast.FunctionDef(name=name):
+            target_name = f'{color}at function {escape.underline if trace is not None else ''}{name}{escape.reset} '
+            break
+          case ast.ClassDef(name=name):
+            target_name = f'{color}at class {escape.underline if trace is not None else ''}{name}{escape.reset} '
+            break
+      else:
+        target_name = ''
+    else:
+      target_name = ''
+
+
+    frame_formatted = f'{prefix}{target_name}'\
+      + f'{color}in {format_path(frame.module.path)}{f':{line_start}' if (frame.module.kind != 'internal') and line_start is not None else ''} as {frame.module.name}'\
       + f'{' [re-raise]' if frame.reraise else ''}{escape.reset}\n' + (trace or '')
 
     file.write(frame_formatted)
 
 
 if __name__ == '__main__':
+  def err(msg: str):
+    class A:
+      raise Exception(msg)
+
   def ge(msg: str):
     try:
-      raise Exception(msg)
+      try:
+        err(msg + ' pre')
+      except Exception as e:
+        raise Exception(msg + ' post') from e
     except Exception as e:
       return e
 
   try:
-    raise ExceptionGroup('foo', [
-      ge('bar'),
-      ExceptionGroup('baz', [
-        ge('qux'),
-        ge('quux'),
-      ]),
-      ge('bar'),
-    ])
+    # raise ExceptionGroup('foo', [
+    #   ge('bar'),
+    #   ExceptionGroup('baz', [
+    #     ge('qux'),
+    #     ge('quux'),
+    #   ]),
+    #   ge('bar'),
+    # ])
+    class A:
+      raise Exception('foo')
   except Exception as e:
     chain = extract(e)
 
