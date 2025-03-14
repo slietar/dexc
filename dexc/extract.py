@@ -9,7 +9,7 @@ from pprint import pprint
 from types import CodeType, ModuleType, TracebackType
 from typing import Literal, Optional, Sequence
 
-from .util import try_read_text
+from .util import get_relative_path, try_read_text
 
 
 type AstNode = ast.Module | ast.expr | ast.stmt
@@ -30,6 +30,7 @@ class ModuleItem:
   name: str
   path: Path
   source: Optional[str] = field(repr=False)
+  relative_path: Optional[Path]
 
 @dataclass(frozen=True, slots=True)
 class FrameArea:
@@ -131,7 +132,6 @@ def extract_exc_frames(exc: BaseException, /):
   for tb_index, tb in enumerate(reversed(tbs)):
     frame = tb.tb_frame
     frame_code = frame.f_code
-    raw_path = frame_code.co_filename
 
     positions = next(
       itertools.islice(frame_code.co_positions(), tb.tb_lasti // 2, None)
@@ -144,7 +144,53 @@ def extract_exc_frames(exc: BaseException, /):
       positions[3] if positions is not None else None,
     )
 
-    module_item = extract_module_from_code(frame_code) if frame_code is not None else None
+    # Finds most modules
+    module_instance = inspect.getmodule(frame_code)
+
+    if module_instance is not None:
+      module_name = module_instance.__name__
+    else:
+      # Finds modules for frames such as '<frozen importlib._bootstrap>'
+      module_name = frame.f_globals.get('__name__')
+      module_instance = sys.modules.get(module_name) if module_name is not None else None
+
+    if module_instance is not None:
+      module_path = Path(inspect.getfile(module_instance))
+      module_source = inspect.getsource(module_instance) # TODO: Add check if fails
+    else:
+      module_path = Path(frame_code.co_filename)
+      module_source = try_read_text(module_path)
+
+    # inspect.getmodulename(path)
+
+    if module_path is not None:
+      relative_path, in_path = get_relative_path(module_path)
+      kind: ModuleKind = 'user' if not in_path else 'lib'
+    else:
+      relative_path = None
+      kind = 'user'
+
+    if module_name is not None:
+      module_segments = module_name.split('.')
+
+      if module_segments[0] in sys.builtin_module_names:
+        kind = 'std'
+
+    if module_source is not None:
+      module_ast = ast.parse(module_source)
+    else:
+      module_ast = None
+
+    # module_item = extract_module_from_code(frame_code) if frame_code is not None else None
+    module_item = ModuleItem(
+      ast=module_ast,
+      instance=module_instance,
+      kind=kind,
+      name=module_name,
+      path=module_path,
+      source=module_source,
+      relative_path=relative_path,
+    )
 
     if (module_item is not None) and (module_item.ast is not None) and (positions is not None):
       target = identify_node(module_item.ast, area)
@@ -169,69 +215,6 @@ def extract_exc_frames(exc: BaseException, /):
     frames.append(frame)
 
   return frames
-
-
-
-def extract_module_from_code(code: CodeType):
-  instance = inspect.getmodule(code)
-
-  if instance is None:
-    return extract_module_from_path(Path(code.co_filename))
-
-  return extract_module_from_module(instance)
-
-@functools.cache
-def extract_module_from_module(instance: ModuleType):
-  name = instance.__name__
-  segments = name.split('.')
-  path = Path(inspect.getfile(instance))
-
-  # kind = 'internal' if module_name.startswith('<') else 'user'
-
-  if segments[0] in sys.builtin_module_names:
-    kind = 'std'
-  else:
-    try:
-      path.relative_to(Path.cwd())
-    except ValueError:
-      kind = 'lib'
-    else:
-      kind = 'user'
-
-  source = inspect.getsource(instance)
-
-  return ModuleItem(
-    ast=ast.parse(source),
-    instance=instance,
-    kind=kind,
-    name=name,
-    path=path,
-    source=source,
-  )
-
-@functools.cache
-def extract_module_from_path(path: Path):
-  name = inspect.getmodulename(path)
-
-  if name is None:
-    return None
-
-  # try:
-  #   frame_contents = path.read_text()
-  # except OSError:
-  #   frame_contents = None
-
-  # Alternative
-  # frame_contents = inspect.getsourcefile(sys.modules[module_name])
-
-  return ModuleItem(
-    ast=None,
-    instance=None,
-    kind='user',
-    name=name,
-    path=path,
-    source=try_read_text(path),
-  )
 
 
 def identify_node(module: ast.Module, area: FrameArea):

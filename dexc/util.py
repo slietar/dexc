@@ -1,13 +1,11 @@
 import sys
 from pathlib import Path
+from typing import Optional
 
 
-def format_path(path: Path, /):
+def get_relative_path(path: Path, /) -> tuple[Optional[Path], bool]:
   cwd = Path.cwd()
-  roots = [
-    *(Path(path) for path in sys.path if path),
-    cwd,
-  ]
+  roots = [p for path in sys.path if path and (p := Path(path)) != cwd]
 
   for root in roots:
     try:
@@ -15,12 +13,16 @@ def format_path(path: Path, /):
     except ValueError:
       pass
     else:
-      if root == cwd:
-        return f'./{relative_path}'
-      else:
-        return relative_path
+      return relative_path, True
 
-  return path.name
+  try:
+    relative_path = path.relative_to(cwd)
+  except ValueError:
+    pass
+  else:
+    return relative_path, False
+
+  return None, False
 
 def try_read_text(path: Path, /):
   try:
