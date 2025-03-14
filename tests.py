@@ -1,7 +1,10 @@
-from pathlib import Path
+import asyncio
 import sys
+from pathlib import Path
 from tempfile import TemporaryDirectory
-from dexc import dump
+
+from dexc.install import dump
+from dexc.options import Options
 
 
 # Base test
@@ -111,6 +114,48 @@ def test10():
   A()
 
 
+# Repeated block of frames
+
+def test11():
+  def a(x: int):
+    if x == 0:
+      raise Exception('Done')
+
+    b(x)
+
+  def b(x: int):
+    a(x - 1)
+
+  a(8)
+
+
+# Error in class
+
+def test12():
+  class A(B): # type: ignore
+    pass
+
+
+# Error in method
+
+def test13():
+  class A:
+    def a(self):
+      raise Exception
+
+  A().a()
+
+
+# Error in async method
+
+def test14():
+  class A:
+    async def a(self):
+      raise Exception
+
+  asyncio.run(A().a())
+
+
 # ---
 
 
@@ -118,16 +163,29 @@ for test in [
   test1,
   test2,
   test3,
-  # test4,
+  test4,
   test5,
   test6,
   test7,
   test8,
   test9,
+  # test10,
+  test11,
+  test12,
+  test13,
+  test14,
 ]:
+  old_recursion_limit = sys.getrecursionlimit()
+  sys.setrecursionlimit(50)
+
   print(f'-- {test.__name__} {'-' * 80}')
 
   try:
     test()
   except Exception as e:
-    dump(e, sys.stdout)
+    sys.setrecursionlimit(old_recursion_limit)
+    dump(e, sys.stdout, Options())
+  else:
+    raise Exception(f'Test {test.__name__} did not raise an exception')
+
+  print()
