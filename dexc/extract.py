@@ -155,7 +155,7 @@ def extract_exc_frames(exc: BaseException, /):
       area=area,
       module=module_item,
       target=target,
-      reraise=((tb_index > 0) and isinstance(target, ast.Raise)),
+      reraise=((tb_index > 0) and (target is not None) and isinstance(target.node, ast.Raise)),
     )
 
     # frame = extract_frame(

@@ -1,13 +1,28 @@
+import sys
 from pathlib import Path
 
 
-def format_path(path: Path, relative_to: Path = Path.cwd()):
-  try:
-    return path.relative_to(relative_to)
-  except ValueError:
-    return path.name
+def format_path(path: Path, /):
+  cwd = Path.cwd()
+  roots = [
+    *(Path(path) for path in sys.path if path),
+    cwd,
+  ]
 
-def try_read_text(path: Path):
+  for root in roots:
+    try:
+      relative_path = path.relative_to(root)
+    except ValueError:
+      pass
+    else:
+      if root == cwd:
+        return f'./{relative_path}'
+      else:
+        return relative_path
+
+  return path.name
+
+def try_read_text(path: Path, /):
   try:
     return path.read_text()
   except OSError:

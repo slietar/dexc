@@ -1,12 +1,11 @@
 import ast
 import math
 import os
-import sys
 from dataclasses import dataclass
 from typing import IO
 
 from .compression import compress
-from .extract import ExceptionChain, ExceptionItem, extract
+from .extract import ExceptionChain, ExceptionItem
 from .options import Options
 from .util import format_path
 from .vendor import get_ipython
@@ -111,7 +110,7 @@ def render_item(item: ExceptionItem, file: IO[str], symbols: Symbols, options: O
     atom_correct_index = atom_index if options.inner_frame_on_top else len(compressed.atoms) - atom_index - 1
 
     repeat_box = (atom.repeat > 1) and (len(atom.keys) > 1)
-    frame_prefix = prefix + (f'{symbols.box_vertical} ' if repeat_box else '')
+    frame_prefix = prefix + (f'{symbols.box_vertical} ' if repeat_box else '  ')
 
     if repeat_box or newline_required:
       file.write(f'{prefix}\n')
@@ -231,11 +230,11 @@ def render_item(item: ExceptionItem, file: IO[str], symbols: Symbols, options: O
       if frame.target is not None:
         for node in [frame.target.node, *frame.target.parents[::-1]]:
           match node:
-            case ast.FunctionDef(name=name):
-              target_name = f'{color}at function {symbols.color_underline if trace is not None else ''}{name}{symbols.color_reset} '
+            case ast.AsyncFunctionDef(name=name) | ast.FunctionDef(name=name):
+              target_name = f'{color}at function {symbols.color_underline}{name}{symbols.color_reset} '
               break
             case ast.ClassDef(name=name):
-              target_name = f'{color}at class {symbols.color_underline if trace is not None else ''}{name}{symbols.color_reset} '
+              target_name = f'{color}at class {symbols.color_underline}{name}{symbols.color_reset} '
               break
             case ast.Module():
               target_name = f'{color}at module{symbols.color_reset} '
