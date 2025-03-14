@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from typing import IO
 
 from .compression import compress
-from .extract import ExceptionChain, ExceptionItem
+from .extract import (ExceptionChain, ExceptionItem, LabeledEnvironment,
+                      ModuleEnvironment)
 from .options import Options
-from .util import format_path
 from .vendor import get_ipython
 
 
@@ -124,19 +124,19 @@ def render_item(item: ExceptionItem, file: IO[str], symbols: Symbols, options: O
       col_start = frame.area.col_start
       col_end = frame.area.col_end
 
-      if (
+      if isinstance(frame.env, ModuleEnvironment) and (
         (atom_correct_index == 0) or (
-          (frame.module.kind == 'user') and
+          (frame.env.kind == 'user') and
           (atom_correct_index < 3)
         )
       ) and (
-        (frame.module.source is not None) and
+        (frame.env.source is not None) and
         (line_start is not None) and
         (line_end is not None) and
         (col_start is not None) and
         (col_end is not None)
       ):
-        code_lines = frame.module.source.splitlines()
+        code_lines = frame.env.source.splitlines()
 
         # Compute target line range
 
@@ -225,27 +225,51 @@ def render_item(item: ExceptionItem, file: IO[str], symbols: Symbols, options: O
 
       newline_required = trace is not None
 
-      color = symbols.color_bright_black if (frame.module.kind != 'user') and (frame_index != 0) else ''
+      color = symbols.color_bright_black if (
+        isinstance(frame.env, ModuleEnvironment) and
+        (frame.env.kind != 'user') and
+        (frame_index != 0)
+      ) else ''
 
       if frame.target is not None:
         for node in [frame.target.node, *frame.target.parents[::-1]]:
           match node:
             case ast.AsyncFunctionDef(name=name) | ast.FunctionDef(name=name):
-              target_name = f'{color}at function {symbols.color_underline}{name}{symbols.color_reset} '
+              target_name = f'{color}at function {symbols.color_underline}{name}{symbols.color_reset}'
               break
             case ast.ClassDef(name=name):
-              target_name = f'{color}at class {symbols.color_underline}{name}{symbols.color_reset} '
+              target_name = f'{color}at class {symbols.color_underline}{name}{symbols.color_reset}'
               break
             case ast.Module():
-              target_name = f'{color}at module{symbols.color_reset} '
+              target_name = f'{color}at module{symbols.color_reset}'
               break
         else:
           target_name = ''
       else:
         target_name = ''
 
-      file.write(f'{frame_prefix}{target_name}')
-      file.write(f'{color}in {format_path(frame.module.path)}{f':{line_start}' if (frame.module.kind != 'internal') and line_start is not None else ''} as {frame.module.name}')
+      file.write(f'{frame_prefix}{target_name}{color}')
+
+      match frame.env:
+        case LabeledEnvironment(label):
+          file.write(f'at fragment {label}')
+        case ModuleEnvironment():
+          file.write(f' in {frame.env.name}')
+
+          if frame.env.relative_path is not None:
+            file.write(' (')
+
+            if frame.env.kind == 'user':
+              file.write('./')
+
+            file.write(f'{frame.env.relative_path}')
+
+            if (frame.env.kind != 'internal') and (line_start is not None):
+              file.write(f':{line_start}')
+
+            file.write(')')
+
+      # file.write(f'{color}in {format_path(frame.module.path)}{f':{line_start}' if (frame.module.kind != 'internal') and line_start is not None else ''} as {frame.module.name}')
 
       if frame.reraise:
         file.write(' [re-raise]')

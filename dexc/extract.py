@@ -23,14 +23,21 @@ class AstTarget:
 type ModuleKind = Literal['internal', 'std', 'lib', 'user']
 
 @dataclass(frozen=True, slots=True)
-class ModuleItem:
+class ModuleEnvironment:
   ast: Optional[ast.Module]
   instance: Optional[ModuleType]
   kind: ModuleKind
   name: str
-  path: Path
+  path: Optional[Path]
   source: Optional[str] = field(repr=False)
   relative_path: Optional[Path]
+
+@dataclass(frozen=True, slots=True)
+class LabeledEnvironment:
+  label: str
+
+type Environment = LabeledEnvironment | ModuleEnvironment
+
 
 @dataclass(frozen=True, slots=True)
 class FrameArea:
@@ -42,7 +49,7 @@ class FrameArea:
 @dataclass(eq=True, frozen=True, slots=True)
 class FrameItem:
   area: FrameArea
-  module: ModuleItem
+  env: Environment
   target: Optional[AstTarget]
   reraise: bool
 
@@ -144,77 +151,109 @@ def extract_exc_frames(exc: BaseException, /):
       positions[3] if positions is not None else None,
     )
 
-    # Finds most modules
+
+    # Scenarios
+    #
+    #   1. Classic frame
+    #   2. Internal frame e.g. <frozen importlib._bootstrap>
+    #     - codeobj.co_filename is '<frozen ...>'
+    #     - __name__ is not set
+    #     - inspect.getmodule() is None
+    #     - inspect.getsource() is available
+    #   3. Compile + eval/exec
+    #     - codeobj.co_filename is '<string>' or something similar
+    #     - __name__ may correspond to wrong module
+    #     - inspect.getmodule() is None
+    #     - inspect.getsource() raises an OSError
+    #   4. File is deleted before exception is handled, module fails to load (i.e. exception raised when loading module)
+    #     - codeobj.co_filename is correct but points to missing file
+    #     - __name__ is present but module is missing from sys.modules
+    #     - inspect.getmodule() is None
+    #     - inspect.getsource() raises an OSError
+    #   5. File is deleted before exception is handled, module is loaded
+    #     - codeobj.co_filename is correct but points to missing file
+    #     - __name__ is present and points to module
+    #     - inspect.getmodule() is correct
+    #     - inspect.getsource() raises an OSError
+
+    # print('>>', frame_code.co_qualname)
+    # print(inspect.getmodule(frame_code))
+
+    # try:
+    #   inspect.getsource(frame_code)
+    # except OSError:
+    #   print('source not ok')
+    # else:
+    #   print('source ok')
+
+    # print(frame.f_globals.get('__name__'))
+    # print(sys.modules.get(frame.f_globals.get('__name__')))
+    # print(sys.modules)
+
+
     module_instance = inspect.getmodule(frame_code)
 
-    if module_instance is not None:
-      module_name = module_instance.__name__
-    else:
-      # Finds modules for frames such as '<frozen importlib._bootstrap>'
+    if module_instance is None:
       module_name = frame.f_globals.get('__name__')
-      module_instance = sys.modules.get(module_name) if module_name is not None else None
+
+      if module_name is not None:
+        module_instance = sys.modules.get(module_name)
 
     if module_instance is not None:
-      module_path = Path(inspect.getfile(module_instance))
-      module_source = inspect.getsource(module_instance) # TODO: Add check if fails
+      env = get_env_from_module_instance(module_instance)
     else:
-      module_path = Path(frame_code.co_filename)
-      module_source = try_read_text(module_path)
+      env = LabeledEnvironment(label=frame_code.co_filename)
 
-    # inspect.getmodulename(path)
-
-    if module_path is not None:
-      relative_path, in_path = get_relative_path(module_path)
-      kind: ModuleKind = 'user' if not in_path else 'lib'
-    else:
-      relative_path = None
-      kind = 'user'
-
-    if module_name is not None:
-      module_segments = module_name.split('.')
-
-      if module_segments[0] in sys.builtin_module_names:
-        kind = 'std'
-
-    if module_source is not None:
-      module_ast = ast.parse(module_source)
-    else:
-      module_ast = None
-
-    # module_item = extract_module_from_code(frame_code) if frame_code is not None else None
-    module_item = ModuleItem(
-      ast=module_ast,
-      instance=module_instance,
-      kind=kind,
-      name=module_name,
-      path=module_path,
-      source=module_source,
-      relative_path=relative_path,
-    )
-
-    if (module_item is not None) and (module_item.ast is not None) and (positions is not None):
-      target = identify_node(module_item.ast, area)
+    if isinstance(env, ModuleEnvironment) and (env.ast is not None) and (positions is not None):
+      target = identify_node(env.ast, area)
     else:
       target = None
 
     frame = FrameItem(
       area=area,
-      module=module_item,
+      env=env,
       target=target,
       reraise=((tb_index > 0) and (target is not None) and isinstance(target.node, ast.Raise)),
     )
 
-    # frame = extract_frame(
-    #   code=frame_code,
-    #   frame_index=(tb_index + (1 if is_syntax_error else 0)),
-    #   func_name=frame_code.co_qualname,
-    #   raw_path=raw_path,
-    #   positions=positions,
-    # )
-
     frames.append(frame)
 
   return frames
+
+
+@functools.cache
+def get_env_from_module_instance(instance: ModuleType, /):
+  module_name = instance.__name__
+
+  try:
+    source = inspect.getsource(instance)
+  except OSError:
+    tree = None
+    source = None
+  else:
+    tree = ast.parse(source)
+
+  path = Path(inspect.getfile(instance))
+
+  if path is not None:
+    relative_path, in_path = get_relative_path(path)
+    kind: ModuleKind = 'user' if not in_path else 'lib'
+  else:
+    relative_path = None
+    kind = 'user'
+
+  if (module_name is not None) and (module_name.split('.', maxsplit=1)[0] in sys.builtin_module_names):
+    kind = 'std'
+
+  return ModuleEnvironment(
+    ast=tree,
+    instance=instance,
+    kind=kind,
+    name=module_name,
+    path=path,
+    source=source,
+    relative_path=relative_path,
+  )
 
 
 def identify_node(module: ast.Module, area: FrameArea):

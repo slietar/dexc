@@ -156,8 +156,70 @@ def test14():
   asyncio.run(A().a())
 
 
+# Eval
+
+def test16():
+  eval('x')
+
+
+# Compile + eval with co_filename = '<string>'
+
+def test17():
+  eval(compile('x', '<string>', 'exec'), {}, {})
+
+
+# Temporary file that fails to load its module
+
+def test18():
+  with TemporaryDirectory() as dir_path:
+    module_name = 'test18'
+    (Path(dir_path) / f'{module_name}.py').write_text('raise Exception')
+
+    sys.path.append(dir_path)
+
+    __import__(module_name)
+
+
+# Temporary file that loads its module
+
+def test19():
+  with TemporaryDirectory() as dir_path:
+    module_name = 'test19'
+    (Path(dir_path) / f'{module_name}.py').write_text('def foo(): raise Exception')
+
+    sys.path.append(dir_path)
+
+    mod = __import__(module_name)
+    mod.foo()
+
+
+# Import with recursion limit too low
+
+def test20():
+  old_recursion_limit = sys.getrecursionlimit()
+  sys.setrecursionlimit(50)
+
+  try:
+    import scipy
+  finally:
+    sys.setrecursionlimit(old_recursion_limit)
+
+
+# Error raised by module of project
+
+def test21():
+  def f(x):
+    raise Exception
+
+  import scipy
+  scipy.optimize.fmin(f, [0])
+
+
 # ---
 
+
+# sys.setrecursionlimit(50)
+# test15()
 
 for test in [
   test1,
@@ -174,9 +236,15 @@ for test in [
   test12,
   test13,
   test14,
+  test16,
+  test17,
+  test18,
+  test19,
+  test20,
+  test21,
 ]:
   old_recursion_limit = sys.getrecursionlimit()
-  sys.setrecursionlimit(50)
+  sys.setrecursionlimit(150)
 
   print(f'-- {test.__name__} {'-' * 80}')
 
@@ -187,5 +255,6 @@ for test in [
     dump(e, sys.stdout, Options())
   else:
     raise Exception(f'Test {test.__name__} did not raise an exception')
+    pass
 
   print()
