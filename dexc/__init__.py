@@ -19,7 +19,7 @@ def dump(exc: BaseException, file: IO[str], options: 'Options'):
 def hook(exc: BaseException, file: IO[str]):
   from .options import Options
 
-  options, error_message = Options.load(**kwargs) # type: ignore
+  options, error_message = Options.load()
 
   if error_message is not None:
     print(f'Failed to load dexc options\n{error_message}\n', file=sys.stderr)

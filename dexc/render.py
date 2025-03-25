@@ -132,8 +132,10 @@ def render_item(
         file.write(current_prefix + current_indent + desc_indent + desc_line + '\n')
 
       newline_required = True
-    else:
+    elif desc:
       file.write(f': {desc}\n')
+    else:
+      file.write('\n')
 
 
     # Notes
@@ -366,26 +368,30 @@ def render_frames(item_frames: Sequence[FrameItem], file: IO[str], symbols: Symb
         for node in [frame.target.node, *frame.target.parents[::-1]]:
           match node:
             case ast.AsyncFunctionDef(name=name) | ast.FunctionDef(name=name):
-              file.write('at function')
+              file.write('at function ')
               target_name = name
               break
             case ast.ClassDef(name=name):
-              file.write('at class')
+              file.write('at class ')
               target_name = name
               break
             case ast.Module():
-              file.write(f'at module')
+              file.write(f'at module ')
               break
 
         if target_name is not None:
-          file.write(f' {symbols.color_underline}{target_name}{symbols.color_reset}{color}')
+          file.write(f'{symbols.color_underline}{target_name}{symbols.color_reset} {color}')
 
       match frame.env:
+        case LabeledEnvironment(label=None):
+          file.write(f'in unknown fragment')
         case LabeledEnvironment(label):
-          file.write(f'at fragment {label}')
+          file.write(f'in fragment {label}')
         case ModuleEnvironment():
           if frame.env.name is not None:
-            file.write(f' in {frame.env.name}')
+            file.write(f'in {frame.env.name}')
+          else:
+            file.write('in unknown module')
 
           if frame.env.relative_path is not None:
             file.write(' (')

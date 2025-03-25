@@ -5,7 +5,6 @@ import itertools
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from pprint import pprint
 from types import ModuleType, TracebackType
 from typing import Literal, Optional
 
@@ -34,7 +33,7 @@ class ModuleEnvironment:
 
 @dataclass(frozen=True, slots=True)
 class LabeledEnvironment:
-  label: str
+  label: Optional[str]
 
 type Environment = LabeledEnvironment | ModuleEnvironment
 
@@ -112,26 +111,35 @@ def extract_exc_frames(exc: BaseException, /):
 
   # Detect syntax error
 
+  # Inner frames are first
   frames = list[FrameItem]()
-  is_syntax_error = False # isinstance(exc, SyntaxError)
 
-  # if is_syntax_error:
-  #   file.write(format_frame(
-  #     escape=escape,
-  #     frame_index=0,
-  #     func_name=Path(exc.filename).name,
-  #     prefix=prefix,
-  #     raw_path=exc.filename,
-  #     positions=(
-  #       exc.lineno,
-  #       exc.end_lineno,
-  #       (exc.offset - 1) if exc.offset is not None else None,
-  #       (
-  #         (exc.end_offset - 1) if exc.end_offset > 0 else exc.offset
-  #       ) if exc.end_offset is not None else None
-  #     ),
-  #     options=options
-  #   ))
+  if isinstance(exc, SyntaxError):
+    if exc.filename is not None:
+      source_path = Path(exc.filename)
+
+      if source_path.exists():
+        env = get_env_from_module_path(source_path)
+      else:
+        env = LabeledEnvironment(label=exc.filename)
+    else:
+      env = LabeledEnvironment(label=None)
+
+    frame = FrameItem(
+      area=FrameArea(
+        exc.lineno,
+        exc.end_lineno,
+        (exc.offset - 1) if exc.offset is not None else None,
+        (
+          (exc.end_offset - 1) if exc.end_offset > 0 else exc.offset
+        ) if exc.end_offset is not None else None,
+      ),
+      env=env,
+      reraise=False,
+      target=None,
+    )
+
+    frames.append(frame)
 
 
   # Extract frames
@@ -264,7 +272,10 @@ def get_env_from_module(
   # Get tree
 
   if source is not None:
-    tree = ast.parse(source)
+    try:
+      tree = ast.parse(source)
+    except SyntaxError:
+      tree = None
   else:
     tree = None
 
