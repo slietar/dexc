@@ -64,7 +64,7 @@ class Symbols:
 
 
 
-def render(chain: ExceptionChain, file: IO[str], options: Options, *, _prefix: str = ''):
+def render(chain: ExceptionChain, file: IO[str], options: Options, *, _floating: bool = False, _is_last: bool = True, _prefix: str = ''):
   colorize = (options.colorize == True) or (
     (options.colorize is None) and
     (not os.environ.get('NO_COLOR')) and
@@ -86,16 +86,20 @@ def render(chain: ExceptionChain, file: IO[str], options: Options, *, _prefix: s
       file.write(f']{symbols.color_reset}\n{_prefix}\n{_prefix}')
 
     file.write(f'{type(item.instance).__name__}: {item.instance}\n')
-    render_frames(item, file, symbols, options, prefix=f'{_prefix}{symbols.box_vertical + '' if item.children else ''}')
+    render_frames(item, file, symbols, options, is_last=False, prefix=f'{_prefix}{symbols.box_vertical + ' ' if item.children else ''}{'  ' if not _floating else ''}')
 
     for child_index, child in enumerate(item.children):
       is_child_last = child_index == len(item.children) - 1
 
       file.write(f'{_prefix}{symbols.box_up_right if is_child_last else symbols.box_vertical_right}{symbols.box_horizontal * 2} ')
-      render(child, file, options, _prefix=f'{_prefix}{'  ' if is_child_last else symbols.box_vertical}   ')
+      render(child, file, options, _floating=True, _is_last=(_is_last and is_child_last), _prefix=f'{_prefix}{'    ' if is_child_last else symbols.box_vertical + '   '}')
 
 
-def render_frames(item: ExceptionItem, file: IO[str], symbols: Symbols, options: Options, *, prefix: str):
+def render_frames(item: ExceptionItem, file: IO[str], symbols: Symbols, options: Options, *, is_last: bool, prefix: str):
+  # Additional options
+  indent = '  '
+  reserve_repeat_box_space = False
+
   frames = list(enumerate(item.frames))
 
   if not options.inner_frame_on_top:
@@ -104,21 +108,26 @@ def render_frames(item: ExceptionItem, file: IO[str], symbols: Symbols, options:
   compressed = compress(frames, key=(lambda x: x[1]))
   # cum_frame_count = [0, *itertools.accumulate(len(atom.keys) for atom in compressed.atoms[:-1])]
 
+  # Whether a newline is required before the next frame
   newline_required = False
 
   for atom_index, atom in enumerate(compressed.atoms):
     atom_correct_index = atom_index if options.inner_frame_on_top else len(compressed.atoms) - atom_index - 1
 
     repeat_box = (atom.repeat > 1) and (len(atom.keys) > 1)
-    frame_prefix = prefix + (f'{symbols.box_vertical} ' if repeat_box else '  ')
+    frame_prefix = prefix + (f'{symbols.box_vertical} ' if repeat_box else (indent if reserve_repeat_box_space else ''))
 
-    if repeat_box or newline_required:
-      file.write(f'{prefix}\n')
+    if newline_required:
+      file.write(prefix + '\n')
+      newline_required = False
 
     if repeat_box:
-      file.write(f'{symbols.box_down_right}{symbols.box_horizontal * 2} Repeated {atom.repeat} times {symbols.box_horizontal * 2}\n')
+      file.write(f'{prefix}{symbols.box_down_right}{symbols.box_horizontal * 2} Repeated {atom.repeat} times {symbols.box_horizontal * 2}\n')
 
     for frame_index, frame in atom.realization[:len(atom.keys)]:
+      if newline_required:
+        file.write(frame_prefix + '\n')
+
       line_start = frame.area.line_start
       line_end = frame.area.line_end
       col_start = frame.area.col_start
@@ -172,7 +181,6 @@ def render_frames(item: ExceptionItem, file: IO[str], symbols: Symbols, options:
 
         # Display context before target
 
-        indent = '  '
         trace = ''
 
         for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
@@ -220,10 +228,12 @@ def render_frames(item: ExceptionItem, file: IO[str], symbols: Symbols, options:
         for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
           line_number = line_end + rel_line_index + 1
           trace += f'{frame_prefix}{symbols.color_bright_black}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}{symbols.color_reset}\n'
-      else:
-        trace = None
 
-      newline_required = trace is not None
+        # The line of ^^^^ can be considered a newline
+        newline_required = line_end != context_line_end
+      else:
+        newline_required = False
+        trace = None
 
 
       color = symbols.color_bright_black if not (
@@ -274,16 +284,18 @@ def render_frames(item: ExceptionItem, file: IO[str], symbols: Symbols, options:
 
             file.write(')')
 
-      # file.write(f'{color}in {format_path(frame.module.path)}{f':{line_start}' if (frame.module.kind != 'internal') and line_start is not None else ''} as {frame.module.name}')
-
       if frame.reraise:
         file.write(' [re-raise]')
 
       if (atom.repeat > 1) and (len(atom.keys) == 1):
         file.write(f' [repeated {atom.repeat} times]')
 
+      # Trace ends with a newline
       file.write(f'{symbols.color_reset}\n{trace or ''}')
 
     if repeat_box:
-      file.write(f'{symbols.box_up_right}{symbols.box_horizontal * 3}\n')
+      file.write(f'{prefix}{symbols.box_up_right}{symbols.box_horizontal * 3}\n')
       newline_required = True
+
+  if (not is_last) and newline_required:
+    file.write(f'{prefix}\n')
