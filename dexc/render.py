@@ -86,19 +86,35 @@ def render(chain: ExceptionChain, file: IO[str], options: Options, *, _floating:
       file.write(f']{symbols.color_reset}\n{_prefix}\n{_prefix}')
 
     file.write(f'{type(item.instance).__name__}: {item.instance}\n')
-    render_frames(item, file, symbols, options, is_last=False, prefix=f'{_prefix}{symbols.box_vertical + ' ' if item.children else ''}{'  ' if not _floating else ''}')
+
+    render_frames(
+      item,
+      file,
+      symbols,
+      options,
+      is_last=False,
+      prefix=f'{_prefix}{symbols.box_vertical + ' ' if item.children else ''}{'  ' if not _floating else ''}',
+    )
 
     for child_index, child in enumerate(item.children):
       is_child_last = child_index == len(item.children) - 1
 
       file.write(f'{_prefix}{symbols.box_up_right if is_child_last else symbols.box_vertical_right}{symbols.box_horizontal * 2} ')
-      render(child, file, options, _floating=True, _is_last=(_is_last and is_child_last), _prefix=f'{_prefix}{'    ' if is_child_last else symbols.box_vertical + '   '}')
+
+      render(
+        child,
+        file,
+        options,
+        _floating=True,
+        _is_last=(_is_last and is_child_last),
+        _prefix=f'{_prefix}{'    ' if is_child_last else symbols.box_vertical + '   '}',
+      )
 
 
 def render_frames(item: ExceptionItem, file: IO[str], symbols: Symbols, options: Options, *, is_last: bool, prefix: str):
   # Additional options
   indent = '  '
-  reserve_repeat_box_space = False
+  inset_repeat_box = True
 
   frames = list(enumerate(item.frames))
 
@@ -114,15 +130,22 @@ def render_frames(item: ExceptionItem, file: IO[str], symbols: Symbols, options:
   for atom_index, atom in enumerate(compressed.atoms):
     atom_correct_index = atom_index if options.inner_frame_on_top else len(compressed.atoms) - atom_index - 1
 
-    repeat_box = (atom.repeat > 1) and (len(atom.keys) > 1)
-    frame_prefix = prefix + (f'{symbols.box_vertical} ' if repeat_box else (indent if reserve_repeat_box_space else ''))
-
     if newline_required:
       file.write(prefix + '\n')
       newline_required = False
 
-    if repeat_box:
-      file.write(f'{prefix}{symbols.box_down_right}{symbols.box_horizontal * 2} Repeated {atom.repeat} times {symbols.box_horizontal * 2}\n')
+    # Repeat box
+    if (atom.repeat > 1) and (len(atom.keys) > 1):
+      if inset_repeat_box and (prefix[-2:] == indent):
+        repeat_box_prefix = prefix[:-2]
+      else:
+        repeat_box_prefix = prefix
+
+      frame_prefix = repeat_box_prefix + symbols.box_vertical + ' '
+      file.write(f'{repeat_box_prefix}{symbols.box_down_right}{symbols.box_horizontal * 2} Repeated {atom.repeat} times {symbols.box_horizontal * 2}\n')
+    else:
+      frame_prefix = prefix
+      repeat_box_prefix = None
 
     for frame_index, frame in atom.realization[:len(atom.keys)]:
       if newline_required:
@@ -293,8 +316,8 @@ def render_frames(item: ExceptionItem, file: IO[str], symbols: Symbols, options:
       # Trace ends with a newline
       file.write(f'{symbols.color_reset}\n{trace or ''}')
 
-    if repeat_box:
-      file.write(f'{prefix}{symbols.box_up_right}{symbols.box_horizontal * 3}\n')
+    if repeat_box_prefix is not None:
+      file.write(f'{repeat_box_prefix}{symbols.box_up_right}{symbols.box_horizontal * 3}\n')
       newline_required = True
 
   if (not is_last) and newline_required:
