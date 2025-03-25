@@ -63,16 +63,29 @@ class Symbols:
       self.color_underline = ''
 
 
-
 def render(
   chain: ExceptionChain,
   file: IO[str],
   options: Options,
+):
+  render_item(
+    chain,
+    file,
+    options,
+    floating=False,
+    indent='',
+    prefix='',
+  )
+
+
+def render_item(
+  chain: ExceptionChain,
+  file: IO[str],
+  options: Options,
   *,
-  _floating: bool = False,
-  _indent: str = '',
-  _is_last: bool = True,
-  _prefix: str = '',
+  floating: bool,
+  indent: str,
+  prefix: str,
 ):
   colorize = (options.colorize == True) or (
     (options.colorize is None) and
@@ -80,13 +93,18 @@ def render(
     (file.isatty() or (get_ipython() is not None))
   )
 
+  newline_required = False
   symbols = Symbols(ascii_only=options.ascii_only, colorize=colorize)
 
   for item, relation in zip(chain.items[::-1], [None, *chain.relations[::-1]]) if options.chain_origin_on_top else zip(chain.items, [None, *chain.relations]):
+    if newline_required:
+      file.write(f'{prefix}\n')
+      newline_required = False
+
     # Relation
 
     if relation is not None:
-      file.write(f'{_prefix}\n{_prefix}{symbols.color_italic}[')
+      file.write(f'{prefix}\n{prefix}{symbols.color_italic}[')
 
       match relation:
         case 'cause':
@@ -94,13 +112,12 @@ def render(
         case 'context':
           file.write('Raising while handling' if options.chain_origin_on_top else 'Raised while handling')
 
-      file.write(f']{symbols.color_reset}\n{_prefix}\n{_prefix}')
+      file.write(f']{symbols.color_reset}\n{prefix}\n{prefix}')
 
 
     # Description
 
-    current_prefix = _prefix + (symbols.box_vertical + ' ' if item.children else '')
-    newline_required = False
+    current_prefix, current_indent = (prefix + indent + symbols.box_vertical, ' ') if item.children else (prefix, indent)
 
     desc = str(item.instance)
     desc_indent = '  ' if not item.children else ''
@@ -112,7 +129,7 @@ def render(
       file.write('\n')
 
       for desc_line in desc_lines:
-        file.write(current_prefix + desc_indent + desc_line + '\n')
+        file.write(current_prefix + current_indent + desc_indent + desc_line + '\n')
 
       newline_required = True
     else:
@@ -122,7 +139,7 @@ def render(
     # Notes
 
     notes = getattr(item.instance, '__notes__', [])
-    note_indent = '  ' if not _floating else ''
+    note_indent = '  ' if not floating else ''
 
     for note in notes:
       note_lines = note.splitlines()
@@ -130,54 +147,63 @@ def render(
       if newline_required:
         file.write(f'{current_prefix}\n')
 
-      file.write(f'{current_prefix + note_indent}{symbols.color_underline}note{symbols.color_reset}')
+      file.write(f'{current_prefix + current_indent + note_indent}{symbols.color_underline}note{symbols.color_reset}')
 
       if len(note_lines) > 1:
         file.write('\n')
 
         for note_line in note_lines:
-          file.write(current_prefix + note_indent + '  ' + note_line + '\n')
+          file.write(current_prefix + current_indent + note_indent + '  ' + note_line + '\n')
 
         newline_required = True
       else:
         file.write(f' {note}\n')
         newline_required = False
 
-    if (newline_required or notes) and (item.frames or item.children):
-      file.write(f'{current_prefix}\n')
+    if notes:
+      newline_required = True
 
 
     # Frames
 
-    render_frames(
-      item.frames,
-      # [],
-      file,
-      symbols,
-      options,
-      is_last=False,
-      prefix=f'{current_prefix}{'  ' if not _floating else ''}',
-    )
+    if item.frames:
+      if newline_required:
+        file.write(f'{current_prefix}\n')
+
+      newline_required = render_frames(
+        item.frames,
+        # [],
+        file,
+        symbols,
+        options,
+        prefix=f'{current_prefix + current_indent}{'  ' if not floating else ''}',
+      )
 
 
     # Children
 
     for child_index, child in enumerate(item.children):
+      if newline_required:
+        file.write(f'{current_prefix}\n')
+
       is_child_last = child_index == len(item.children) - 1
+      child_prefix, child_indent = (prefix, indent + '    ') if is_child_last else (prefix + indent + symbols.box_vertical, '   ')
 
-      file.write(f'{_prefix}{symbols.box_up_right if is_child_last else symbols.box_vertical_right}{symbols.box_horizontal * 2} ')
+      file.write(f'{prefix + indent}{symbols.box_up_right if is_child_last else symbols.box_vertical_right}{symbols.box_horizontal * 2} ')
 
-      render(
+      newline_required = render_item(
         child,
         file,
         options,
-        _floating=True,
-        _is_last=(_is_last and is_child_last),
-        _prefix=f'{_prefix}{'    ' if is_child_last else symbols.box_vertical + '   '}',
+        floating=True,
+        indent=child_indent,
+        prefix=child_prefix,
       )
 
+  return newline_required
 
-def render_frames(item_frames: Sequence[FrameItem], file: IO[str], symbols: Symbols, options: Options, *, is_last: bool, prefix: str):
+
+def render_frames(item_frames: Sequence[FrameItem], file: IO[str], symbols: Symbols, options: Options, *, prefix: str):
   # Additional options
   indent = '  '
   inset_repeat_box = True
@@ -320,7 +346,7 @@ def render_frames(item_frames: Sequence[FrameItem], file: IO[str], symbols: Symb
           trace += f'{frame_prefix}{symbols.color_bright_black}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}{symbols.color_reset}\n'
 
         # The line of ^^^^ can be considered a newline
-        newline_required = (line_end != context_line_end) or (not skip_newline_on_highlights_at_trace_ends)
+        newline_required = (line_end != context_line_end) or (line_end_cut != line_end) or (not skip_newline_on_highlights_at_trace_ends)
       else:
         newline_required = False
         trace = None
@@ -387,5 +413,4 @@ def render_frames(item_frames: Sequence[FrameItem], file: IO[str], symbols: Symb
       file.write(f'{repeat_box_prefix}{symbols.box_up_right}{symbols.box_horizontal * 3}\n')
       newline_required = True
 
-  if (not is_last) and newline_required:
-    file.write(f'{prefix}\n')
+  return newline_required
