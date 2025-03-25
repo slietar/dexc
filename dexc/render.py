@@ -86,7 +86,7 @@ def render(chain: ExceptionChain, file: IO[str], options: Options, *, _prefix: s
       file.write(f']{symbols.color_reset}\n{_prefix}\n{_prefix}')
 
     file.write(f'{type(item.instance).__name__}: {item.instance}\n')
-    render_item(item, file, symbols, options, prefix=f'{_prefix}{symbols.box_vertical + ' ' if item.children else ''}')
+    render_frames(item, file, symbols, options, prefix=f'{_prefix}{symbols.box_vertical + '' if item.children else ''}')
 
     for child_index, child in enumerate(item.children):
       is_child_last = child_index == len(item.children) - 1
@@ -95,7 +95,7 @@ def render(chain: ExceptionChain, file: IO[str], options: Options, *, _prefix: s
       render(child, file, options, _prefix=f'{_prefix}{'  ' if is_child_last else symbols.box_vertical}   ')
 
 
-def render_item(item: ExceptionItem, file: IO[str], symbols: Symbols, options: Options, *, prefix: str):
+def render_frames(item: ExceptionItem, file: IO[str], symbols: Symbols, options: Options, *, prefix: str):
   frames = list(enumerate(item.frames))
 
   if not options.inner_frame_on_top:
@@ -225,30 +225,34 @@ def render_item(item: ExceptionItem, file: IO[str], symbols: Symbols, options: O
 
       newline_required = trace is not None
 
-      color = symbols.color_bright_black if (
-        isinstance(frame.env, ModuleEnvironment) and
-        (frame.env.kind != 'user') and
-        (frame_index != 0)
+
+      color = symbols.color_bright_black if not (
+        (isinstance(frame.env, ModuleEnvironment) and (frame.env.kind == 'user')) or
+        (frame_index == 0)
       ) else ''
 
+      file.write(frame_prefix)
+      file.write(color)
+
       if frame.target is not None:
+        target_name = None
+
         for node in [frame.target.node, *frame.target.parents[::-1]]:
           match node:
             case ast.AsyncFunctionDef(name=name) | ast.FunctionDef(name=name):
-              target_name = f'{color}at function {symbols.color_underline}{name}{symbols.color_reset}'
+              file.write('at function')
+              target_name = name
               break
             case ast.ClassDef(name=name):
-              target_name = f'{color}at class {symbols.color_underline}{name}{symbols.color_reset}'
+              file.write('at class')
+              target_name = name
               break
             case ast.Module():
-              target_name = f'{color}at module{symbols.color_reset}'
+              file.write(f'at module')
               break
-        else:
-          target_name = ''
-      else:
-        target_name = ''
 
-      file.write(f'{frame_prefix}{target_name}{color}')
+        if target_name is not None:
+          file.write(f' {symbols.color_underline}{target_name}{symbols.color_reset}{color}')
 
       match frame.env:
         case LabeledEnvironment(label):
