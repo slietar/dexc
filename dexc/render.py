@@ -254,7 +254,8 @@ def render_item(item: ExceptionItem, file: IO[str], symbols: Symbols, options: O
         case LabeledEnvironment(label):
           file.write(f'at fragment {label}')
         case ModuleEnvironment():
-          file.write(f' in {frame.env.name}')
+          if frame.env.name is not None:
+            file.write(f' in {frame.env.name}')
 
           if frame.env.relative_path is not None:
             file.write(' (')

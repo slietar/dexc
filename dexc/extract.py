@@ -6,7 +6,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from pprint import pprint
-from types import CodeType, ModuleType, TracebackType
+from types import ModuleType, TracebackType
 from typing import Literal, Optional, Sequence
 
 from .util import get_relative_path, try_read_text
@@ -27,7 +27,7 @@ class ModuleEnvironment:
   ast: Optional[ast.Module]
   instance: Optional[ModuleType]
   kind: ModuleKind
-  name: str
+  name: Optional[str]
   path: Optional[Path]
   source: Optional[str] = field(repr=False)
   relative_path: Optional[Path]
@@ -192,17 +192,24 @@ def extract_exc_frames(exc: BaseException, /):
 
 
     module_instance = inspect.getmodule(frame_code)
+    module_label = frame_code.co_filename
 
     if module_instance is None:
-      module_name = frame.f_globals.get('__name__')
+      if module_label.startswith('<frozen ') and module_label.endswith('>'):
+        module_name = frame.f_globals.get('__name__')
 
-      if module_name is not None:
-        module_instance = sys.modules.get(module_name)
+        if module_name is not None:
+          module_instance = sys.modules.get(module_name)
 
     if module_instance is not None:
       env = get_env_from_module_instance(module_instance)
     else:
-      env = LabeledEnvironment(label=frame_code.co_filename)
+      module_source_path = inspect.getsourcefile(frame_code)
+
+      if module_source_path is not None:
+        env = get_env_from_module_path(Path(module_source_path))
+      else:
+        env = LabeledEnvironment(label=module_label)
 
     if isinstance(env, ModuleEnvironment) and (env.ast is not None) and (positions is not None):
       target = identify_node(env.ast, area)
@@ -223,33 +230,64 @@ def extract_exc_frames(exc: BaseException, /):
 
 @functools.cache
 def get_env_from_module_instance(instance: ModuleType, /):
-  module_name = instance.__name__
+  return get_env_from_module(
+    instance=instance,
+    path=Path(inspect.getfile(instance)),
+  )
 
-  try:
-    source = inspect.getsource(instance)
-  except OSError:
-    tree = None
+@functools.cache
+def get_env_from_module_path(path: Path, /):
+  return get_env_from_module(
+    instance=None,
+    path=path,
+  )
+
+def get_env_from_module(
+  instance: Optional[ModuleType],
+  path: Path,
+):
+  # Get source
+
+  if instance is not None:
+    try:
+      source = inspect.getsource(instance)
+    except OSError:
+      source = None
+  else:
     source = None
-  else:
+
+  if source is None:
+    source = try_read_text(path)
+
+  # Get tree
+
+  if source is not None:
     tree = ast.parse(source)
-
-  path = Path(inspect.getfile(instance))
-
-  if path is not None:
-    relative_path, in_path = get_relative_path(path)
-    kind: ModuleKind = 'user' if not in_path else 'lib'
   else:
-    relative_path = None
-    kind = 'user'
+    tree = None
 
-  if (module_name is not None) and (module_name.split('.', maxsplit=1)[0] in sys.builtin_module_names):
+  # Get relative path and name
+
+  relative_path, in_syspath = get_relative_path(path)
+
+  if instance is not None:
+    name = instance.__name__
+  elif relative_path is not None:
+    name = relative_path.with_suffix('').as_posix().replace('/', '.')
+  else:
+    name = None
+
+
+  kind: ModuleKind = 'user' if not in_syspath else 'lib'
+
+  if (name is not None) and (name.split('.', maxsplit=1)[0] in sys.builtin_module_names):
     kind = 'std'
 
   return ModuleEnvironment(
     ast=tree,
     instance=instance,
     kind=kind,
-    name=module_name,
+    name=name,
     path=path,
     source=source,
     relative_path=relative_path,
