@@ -1,5 +1,11 @@
 from dataclasses import dataclass
+import json
+from pathlib import Path
 from typing import Optional, TypedDict
+
+
+OPTIONS_RELATIVE_PATH = '.config/dexc/options.json'
+OPTIONS_ABSOLUTE_PATH = Path.home() / OPTIONS_RELATIVE_PATH
 
 
 @dataclass(kw_only=True, slots=True)
@@ -13,6 +19,19 @@ class Options:
   max_target_lines: int = 5
   skip_indentation_highlight: bool = True
   remove_common_indentation: bool = True
+
+  @classmethod
+  def load(cls, other_dict: dict = {}):
+    if OPTIONS_ABSOLUTE_PATH.exists():
+      try:
+        with OPTIONS_ABSOLUTE_PATH.open() as options_file:
+          options_dict = json.load(options_file)
+
+        return cls(**(options_dict | other_dict)), None
+      except Exception as e:
+        return cls(**other_dict), f'Failed to load options: {e}'
+
+    return cls(**other_dict), None
 
 class OptionsDict(TypedDict):
   ascii_only: bool

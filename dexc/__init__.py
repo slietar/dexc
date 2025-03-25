@@ -2,28 +2,37 @@ import sys
 from types import TracebackType
 from typing import IO, TYPE_CHECKING
 
-from .options import Options, OptionsDict
-from .render import get_ipython
+from .vendor import get_ipython
 
 if TYPE_CHECKING:
+  from .options import Options, OptionsDict
   from IPython.core.interactiveshell import InteractiveShell
 
 
-def dump(exc: BaseException, file: IO[str], options: Options):
+def dump(exc: BaseException, file: IO[str], options: 'Options'):
   from .extract import extract
   from .render import render
 
   render(extract(exc), file, options)
 
 
-def install(file: IO[str] = sys.stderr, /, **kwargs: OptionsDict):
-  options = Options(**kwargs) # type: ignore
+def hook(exc: BaseException, file: IO[str]):
+  from .options import Options
 
+  options, error_message = Options.load(**kwargs) # type: ignore
+
+  if error_message is not None:
+    print(f'Failed to load dexc options\n{error_message}\n', file=sys.stderr)
+
+  dump(exc, file, options)
+
+
+def install(file: IO[str] = sys.stderr, /, **kwargs: 'OptionsDict'):
   def except_hook(exc_type: type[BaseException], exc: BaseException, start_tb: TracebackType):
-    dump(exc, file, options)
+    hook(exc, file)
 
   def unraisable_hook(arg):
-    dump(arg.exc_value, file, options)
+    hook(arg.exc_value, file)
 
   sys.excepthook = except_hook
   sys.unraisablehook = unraisable_hook
@@ -33,6 +42,12 @@ def install(file: IO[str] = sys.stderr, /, **kwargs: OptionsDict):
 
   if ipython is not None:
     def ipython_hook(self: 'InteractiveShell', etype: type[BaseException], value: BaseException, tb: TracebackType, tb_offset = None):
-      dump(value, file, options)
+      hook(value, file)
 
     ipython.set_custom_exc((BaseException, ), ipython_hook)
+
+
+__all__ = [
+  'dump',
+  'install',
+]

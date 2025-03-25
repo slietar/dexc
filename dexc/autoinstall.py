@@ -1,3 +1,7 @@
-from .install import install
+from . import install
+
 
 install()
+
+
+__all__ = []

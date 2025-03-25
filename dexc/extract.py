@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from pprint import pprint
 from types import ModuleType, TracebackType
-from typing import Literal, Optional, Sequence
+from typing import Literal, Optional
 
 from .util import get_relative_path, try_read_text
 
@@ -17,7 +17,7 @@ type AstNode = ast.Module | ast.expr | ast.stmt
 @dataclass(frozen=True, slots=True)
 class AstTarget:
   node: AstNode
-  parents: Sequence[AstNode] = field(hash=False)
+  parents: list[AstNode] = field(hash=False)
 
 
 type ModuleKind = Literal['internal', 'std', 'lib', 'user']
@@ -58,14 +58,14 @@ type ExceptionChainRelation = Literal['cause', 'context']
 
 @dataclass(slots=True)
 class ExceptionItem:
-  children: 'Sequence[ExceptionChain]'
-  frames: Sequence[FrameItem]
+  children: 'list[ExceptionChain]'
+  frames: list[FrameItem]
   instance: BaseException
 
 @dataclass(slots=True)
 class ExceptionChain:
-  items: Sequence[ExceptionItem]
-  relations: Sequence[ExceptionChainRelation]
+  items: list[ExceptionItem]
+  relations: list[ExceptionChainRelation]
 
 
 def extract(start_exc: BaseException, /):
@@ -210,6 +210,8 @@ def extract_exc_frames(exc: BaseException, /):
         env = get_env_from_module_path(Path(module_source_path))
       else:
         env = LabeledEnvironment(label=module_label)
+
+    # env = LabeledEnvironment(label=module_label)
 
     if isinstance(env, ModuleEnvironment) and (env.ast is not None) and (positions is not None):
       target = identify_node(env.ast, area)
