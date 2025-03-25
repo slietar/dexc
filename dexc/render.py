@@ -2,10 +2,10 @@ import ast
 import math
 import os
 from dataclasses import dataclass
-from typing import IO
+from typing import IO, Sequence
 
 from .compression import compress
-from .extract import (ExceptionChain, ExceptionItem, LabeledEnvironment,
+from .extract import (ExceptionChain, FrameItem, LabeledEnvironment,
                       ModuleEnvironment)
 from .options import Options
 from .vendor import get_ipython
@@ -64,7 +64,16 @@ class Symbols:
 
 
 
-def render(chain: ExceptionChain, file: IO[str], options: Options, *, _floating: bool = False, _is_last: bool = True, _prefix: str = ''):
+def render(
+  chain: ExceptionChain,
+  file: IO[str],
+  options: Options,
+  *,
+  _floating: bool = False,
+  _indent: str = '',
+  _is_last: bool = True,
+  _prefix: str = '',
+):
   colorize = (options.colorize == True) or (
     (options.colorize is None) and
     (not os.environ.get('NO_COLOR')) and
@@ -74,6 +83,8 @@ def render(chain: ExceptionChain, file: IO[str], options: Options, *, _floating:
   symbols = Symbols(ascii_only=options.ascii_only, colorize=colorize)
 
   for item, relation in zip(chain.items[::-1], [None, *chain.relations[::-1]]) if options.chain_origin_on_top else zip(chain.items, [None, *chain.relations]):
+    # Relation
+
     if relation is not None:
       file.write(f'{_prefix}\n{_prefix}{symbols.color_italic}[')
 
@@ -85,16 +96,71 @@ def render(chain: ExceptionChain, file: IO[str], options: Options, *, _floating:
 
       file.write(f']{symbols.color_reset}\n{_prefix}\n{_prefix}')
 
-    file.write(f'{type(item.instance).__name__}: {item.instance}\n')
+
+    # Description
+
+    current_prefix = _prefix + (symbols.box_vertical + ' ' if item.children else '')
+    newline_required = False
+
+    desc = str(item.instance)
+    desc_indent = '  ' if not item.children else ''
+    desc_lines = desc.splitlines()
+
+    file.write(type(item.instance).__name__)
+
+    if len(desc_lines) > 1:
+      file.write('\n')
+
+      for desc_line in desc_lines:
+        file.write(current_prefix + desc_indent + desc_line + '\n')
+
+      newline_required = True
+    else:
+      file.write(f': {desc}\n')
+
+
+    # Notes
+
+    notes = getattr(item.instance, '__notes__', [])
+    note_indent = '  ' if not _floating else ''
+
+    for note in notes:
+      note_lines = note.splitlines()
+
+      if newline_required:
+        file.write(f'{current_prefix}\n')
+
+      file.write(f'{current_prefix + note_indent}{symbols.color_underline}note{symbols.color_reset}')
+
+      if len(note_lines) > 1:
+        file.write('\n')
+
+        for note_line in note_lines:
+          file.write(current_prefix + note_indent + '  ' + note_line + '\n')
+
+        newline_required = True
+      else:
+        file.write(f' {note}\n')
+        newline_required = False
+
+    if (newline_required or notes) and (item.frames or item.children):
+      file.write(f'{current_prefix}\n')
+
+
+    # Frames
 
     render_frames(
-      item,
+      item.frames,
+      # [],
       file,
       symbols,
       options,
       is_last=False,
-      prefix=f'{_prefix}{symbols.box_vertical + ' ' if item.children else ''}{'  ' if not _floating else ''}',
+      prefix=f'{current_prefix}{'  ' if not _floating else ''}',
     )
+
+
+    # Children
 
     for child_index, child in enumerate(item.children):
       is_child_last = child_index == len(item.children) - 1
@@ -111,12 +177,13 @@ def render(chain: ExceptionChain, file: IO[str], options: Options, *, _floating:
       )
 
 
-def render_frames(item: ExceptionItem, file: IO[str], symbols: Symbols, options: Options, *, is_last: bool, prefix: str):
+def render_frames(item_frames: Sequence[FrameItem], file: IO[str], symbols: Symbols, options: Options, *, is_last: bool, prefix: str):
   # Additional options
   indent = '  '
   inset_repeat_box = True
+  skip_newline_on_highlights_at_trace_ends = True
 
-  frames = list(enumerate(item.frames))
+  frames = list(enumerate(item_frames))
 
   if not options.inner_frame_on_top:
     frames = list(reversed(frames))
@@ -253,7 +320,7 @@ def render_frames(item: ExceptionItem, file: IO[str], symbols: Symbols, options:
           trace += f'{frame_prefix}{symbols.color_bright_black}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}{symbols.color_reset}\n'
 
         # The line of ^^^^ can be considered a newline
-        newline_required = line_end != context_line_end
+        newline_required = (line_end != context_line_end) or (not skip_newline_on_highlights_at_trace_ends)
       else:
         newline_required = False
         trace = None

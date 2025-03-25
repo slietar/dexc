@@ -6,7 +6,7 @@ from typing import Optional, TypedDict
 class Options:
   ascii_only: bool = False
   chain_origin_on_top: bool = False
-  colorize: Optional[bool] = True
+  colorize: Optional[bool] = None
   inner_frame_on_top: bool = False
   max_context_lines_after: int = 2
   max_context_lines_before: int = 3
