@@ -1,3 +1,6 @@
 __pycache__
+*.egg-info
 /dist
 /env
+/pth-test
+uv.lock
