@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 from typing import IO, Sequence
 
-from .compression import compress
+from .compression.greedy import compress
 from .extract import (ExceptionChain, FrameItem, LabeledEnvironment,
                       ModuleEnvironment)
 from .options import Options
@@ -216,28 +216,31 @@ def render_frames(item_frames: Sequence[FrameItem], file: IO[str], symbols: Symb
   if not options.inner_frame_on_top:
     frames = list(reversed(frames))
 
-  compressed = compress(frames, key=(lambda x: x[1]))
+  atoms = compress(frames, backwards=(not options.compression_first_on_top), key=(lambda x: x[1]))
   # cum_frame_count = [0, *itertools.accumulate(len(atom.keys) for atom in compressed.atoms[:-1])]
 
   # Whether a newline is required before the next frame
   newline_required = False
 
-  for atom_index, atom in enumerate(compressed.atoms):
-    atom_correct_index = atom_index if options.inner_frame_on_top else len(compressed.atoms) - atom_index - 1
+  for atom_index, atom in enumerate(atoms):
+    atom_correct_index = atom_index if options.inner_frame_on_top else len(atoms) - atom_index - 1
+    repeat_box = (atom.repeat_count > 1) and (len(atom.keys) > 1)
+
+    if repeat_box and (atom_index > 0):
+      newline_required = True
 
     if newline_required:
       file.write(prefix + '\n')
       newline_required = False
 
-    # Repeat box
-    if (atom.repeat > 1) and (len(atom.keys) > 1):
+    if repeat_box:
       if inset_repeat_box and (prefix[-2:] == indent):
         repeat_box_prefix = prefix[:-2]
       else:
         repeat_box_prefix = prefix
 
       frame_prefix = repeat_box_prefix + symbols.box_vertical + ' '
-      file.write(f'{repeat_box_prefix}{symbols.box_down_right}{symbols.box_horizontal * 2} Repeated {atom.repeat} times {symbols.box_horizontal * 2}\n')
+      file.write(f'{repeat_box_prefix}{symbols.box_down_right}{symbols.box_horizontal * 2} Repeated {atom.repeat_count} times {symbols.box_horizontal * 2}\n')
     else:
       frame_prefix = prefix
       repeat_box_prefix = None
@@ -409,8 +412,8 @@ def render_frames(item_frames: Sequence[FrameItem], file: IO[str], symbols: Symb
       if frame.reraise:
         file.write(' [re-raise]')
 
-      if (atom.repeat > 1) and (len(atom.keys) == 1):
-        file.write(f' [repeated {atom.repeat} times]')
+      if (atom.repeat_count > 1) and (len(atom.keys) == 1):
+        file.write(f' [repeated {atom.repeat_count} times]')
 
       # Trace ends with a newline
       file.write(f'{symbols.color_reset}\n{trace or ''}')

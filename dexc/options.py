@@ -13,6 +13,7 @@ class Options:
   ascii_only: bool = False
   chain_origin_on_top: bool = False
   colorize: Optional[bool] = None
+  compression_first_on_top: bool = False
   inner_frame_on_top: bool = False
   max_context_lines_after: int = 2
   max_context_lines_before: int = 3
@@ -37,6 +38,7 @@ class OptionsDict(TypedDict):
   ascii_only: bool
   chain_origin_on_top: bool
   colorize: Optional[bool]
+  compression_first_on_top: bool
   inner_frame_on_top: bool
   max_context_lines_after: int
   max_context_lines_before: int

@@ -1,15 +1,25 @@
 from typing import Callable, Sequence
 
-from .compression import Atom, MeasuredSolution
+from . import Atom, Solution
 
 
 def compress[T, S](
   items: Sequence[T],
   /,
   *,
+  backwards: bool = False,
   key: Callable[[T], S] = (lambda item: item),
   max_repeat_len: int = 10,
-):
+) -> Solution[T, S]:
+  if backwards:
+    atoms = compress(items[::-1], key=key, max_repeat_len=max_repeat_len)
+
+    return [Atom(
+      keys=atom.keys[::-1],
+      realization=atom.realization[::-1],
+      repeat_count=atom.repeat_count,
+    ) for atom in reversed(atoms)]
+
   keys = list(map(key, items))
   repeats = dict[int, tuple[int, int]]()
 
@@ -42,24 +52,9 @@ def compress[T, S](
     atoms.append(Atom(
       keys=tuple(keys[index:(index + repeat_len)]),
       realization=items[index:(index + repeat_len * repeat)],
-      repeat=repeat,
+      repeat_count=repeat,
     ))
 
     index += repeat_len * repeat
 
-  return MeasuredSolution(atoms, cost=0.0)
-
-
-if __name__ == '__main__':
-  seq = list('12312231233')
-
-  solved = compress(
-    seq,
-    max_repeat_len=4,
-  )
-
-  print(''.join(seq))
-
-  for atom in solved.atoms:
-    print(''.join(map(str, atom.keys)), end='')
-    print('-' * len(atom.keys) * (atom.repeat - 1), end='')
+  return atoms
