@@ -7,6 +7,7 @@ def main():
 
 
     except Exception as e:
+      e.add_note('note 1')
       return e
 
   def a(x: int):
@@ -25,10 +26,13 @@ def main():
       return e
 
   def d():
-    raise ExceptionGroup('Group3', [
+    e = ExceptionGroup('Group3\nhere', [
       produce_exc('F'),
       produce_exc('G'),
     ])
+
+    e.add_note('note 2')
+    raise e
 
   def e():
     try:
@@ -42,8 +46,8 @@ def main():
     produce_exc('B'),
     Exception('C'),
     c(4),
-    ExceptionGroup('Group2', [
-      produce_exc('D'),
+    ExceptionGroup('Group2\nhere', [
+      produce_exc('D\nd'),
       produce_exc('E')
     ]),
     Exception('D'),

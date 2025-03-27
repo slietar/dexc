@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 import dexc
-import dexc.install
+import dexc
 from dexc.options import Options
 
 
@@ -11,7 +11,7 @@ def run_test(module_name: str):
     mod = __import__(module_name, fromlist=('a'))
     mod.main()
   except Exception as e:
-    dexc.install.dump(e, sys.stdout, Options())
+    dexc.dump(e, sys.stdout, Options.load()[0])
 
 
 if len(sys.argv) > 1:
