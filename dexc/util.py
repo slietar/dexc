@@ -73,10 +73,3 @@ def reversed_if[T](it: Reversible[T], condition: bool, /) -> Iterable[T]:
     return reversed(it)
   else:
     return it
-
-
-def try_read_text(path: Path, /):
-  try:
-    return path.read_text()
-  except OSError:
-    return None

@@ -1,16 +1,10 @@
 import ast
-import functools
-import inspect
 import itertools
-import sys
 from dataclasses import dataclass, field
-from pathlib import Path
-from types import CodeType, ModuleType, TracebackType
+from types import TracebackType
 from typing import Literal, Optional
 
-from .vendor import get_ipython
-
-from .util import get_relative_path, try_read_text
+from .inspector import ModuleInfo, ModuleInspector, ModuleKind
 
 
 type AstNode = ast.Module | ast.expr | ast.stmt
@@ -19,46 +13,6 @@ type AstNode = ast.Module | ast.expr | ast.stmt
 class AstTarget:
   node: AstNode
   parents: list[AstNode] = field(hash=False)
-
-
-type ModuleKind = Literal['internal', 'std', 'lib', 'user']
-
-@dataclass(eq=True, frozen=True, slots=True)
-class ModuleEnvironment:
-  ast: Optional[ast.Module]
-  instance: Optional[ModuleType]
-  kind: ModuleKind
-  label: Optional[str]
-  name_segments: Optional[tuple[str, ...]]
-  path: Optional[Path]
-  source: Optional[str] = field(repr=False)
-  relative_path: Optional[Path]
-
-  # def __eq__(self, other: object):
-  #   return (
-  #     isinstance(other, ModuleEnvironment) and
-  #     (self.instance is other.instance) and
-  #     (self.path is other.path) and
-  #     (self.label == other.label) and
-  #     (self.kind == other.kind) and
-  #     (self.name_segments == other.name_segments)
-  #   )
-
-  # def __hash__(self):
-  #   return hash((
-  #     self.instance,
-  #     self.path,
-  #     self.label,
-  #     self.kind,
-  #     tuple(self.name_segments) if self.name_segments is not None else None,
-  #     self.relative_path,
-  #   ))
-
-@dataclass(frozen=True, slots=True)
-class LabeledEnvironment:
-  label: Optional[str]
-
-type Environment = LabeledEnvironment | ModuleEnvironment
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,24 +25,18 @@ class FrameArea:
 @dataclass(eq=True, frozen=True, slots=True)
 class FrameItem:
   area: FrameArea
-  env: Environment
+  module: ModuleInfo
   target: Optional[AstTarget]
   reraise: bool
 
   @property
   def important(self):
-    match self.env:
-      case ModuleEnvironment(kind='user'):
-        return True
-      case LabeledEnvironment():
-        return True
-      case _:
-        return False
+    return self.module.kind == 'user'
 
   @property
   def traceable(self):
     # TODO: Add conditions on area
-    return isinstance(self.env, ModuleEnvironment) and (self.env.source is not None)
+    return self.module.source is not None
 
 
 type ExceptionChainRelation = Literal['cause', 'context']
@@ -144,32 +92,24 @@ def extract_exc_frames(exc: BaseException, /):
   frames = list[FrameItem]()
 
   # Detect syntax error
-  # if isinstance(exc, SyntaxError):
-  #   if exc.filename is not None:
-  #     source_path = Path(exc.filename)
+  if isinstance(exc, SyntaxError) and (exc.filename is not None):
+    module_info = ModuleInspector().inspect(exc.filename)
 
-  #     if source_path.exists():
-  #       env = get_env_from_module_path(source_path)
-  #     else:
-  #       env = LabeledEnvironment(label=exc.filename)
-  #   else:
-  #     env = LabeledEnvironment(label=None)
+    frame = FrameItem(
+      area=FrameArea(
+        exc.lineno,
+        exc.end_lineno,
+        (exc.offset - 1) if exc.offset is not None else None,
+        (
+          (exc.end_offset - 1) if exc.end_offset > 0 else exc.offset
+        ) if exc.end_offset is not None else None,
+      ),
+      module=module_info,
+      reraise=False,
+      target=None,
+    )
 
-  #   frame = FrameItem(
-  #     area=FrameArea(
-  #       exc.lineno,
-  #       exc.end_lineno,
-  #       (exc.offset - 1) if exc.offset is not None else None,
-  #       (
-  #         (exc.end_offset - 1) if exc.end_offset > 0 else exc.offset
-  #       ) if exc.end_offset is not None else None,
-  #     ),
-  #     env=env,
-  #     reraise=False,
-  #     target=None,
-  #   )
-
-  #   frames.append(frame)
+    frames.append(frame)
 
   if exc.__traceback__:
     frames += extract_tb_frames(exc.__traceback__)
@@ -188,6 +128,7 @@ def extract_tb_frames(start_tb: TracebackType, /):
 
   # Extract frames
 
+  inspector = ModuleInspector()
   frames = list[FrameItem]()
 
   for tb_index, tb in enumerate(reversed(tbs)):
@@ -205,165 +146,16 @@ def extract_tb_frames(start_tb: TracebackType, /):
       positions[3] if positions is not None else None,
     )
 
+    module_info = inspector.inspect(frame.f_code.co_filename, frame)
 
-    # Scenarios
-    #
-    #   1. Classic frame
-    #   2. Internal frame e.g. <frozen importlib._bootstrap>
-    #     - codeobj.co_filename is '<frozen ...>'
-    #     - __name__ is not set
-    #     - inspect.getmodule() is None
-    #     - inspect.getsource() is available
-    #   3. Compile + eval/exec
-    #     - codeobj.co_filename is '<string>' or something similar
-    #     - __name__ may correspond to wrong module
-    #     - inspect.getmodule() is None
-    #     - inspect.getsource() raises an OSError
-    #   4. File is deleted before exception is handled, module fails to load (i.e. exception raised when loading module)
-    #     - codeobj.co_filename is correct but points to missing file
-    #     - __name__ is present but module is missing from sys.modules
-    #     - inspect.getmodule() is None
-    #     - inspect.getsource() raises an OSError
-    #   5. File is deleted before exception is handled, module is loaded
-    #     - codeobj.co_filename is correct but points to missing file
-    #     - __name__ is present and points to module
-    #     - inspect.getmodule() is correct
-    #     - inspect.getsource() raises an OSError
-
-    # print('>>', frame_code.co_qualname)
-    # print(inspect.getmodule(frame_code))
-
-    # try:
-    #   inspect.getsource(frame_code)
-    # except OSError:
-    #   print('source not ok')
-    # else:
-    #   print('source ok')
-
-    # print(frame.f_globals.get('__name__'))
-    # print(sys.modules.get(frame.f_globals.get('__name__')))
-    # print(sys.modules)
-
-
-    module_instance = inspect.getmodule(frame_code)
-    module_filename = frame_code.co_filename
-
-    # print(module_instance, module_filename)
-
-    if module_instance is None:
-      # Does not work in the following cases:
-      #   (1) Poor calls to compile() or eval() where __name__ is the host module's name - rendering may then fails
-      #   (2) IPython complains when we call get_env_from_module_instance()
-      if module_filename.startswith('<frozen ') and module_filename.endswith('>'):
-        module_name = frame.f_globals.get('__name__')
-
-        if module_name is not None:
-          module_instance = sys.modules.get(module_name)
-
-    module_source_path_raw = (
-      (inspect.getabsfile(module_instance) if module_instance is not None else None) or
-      inspect.getabsfile(frame_code)
-    )
-
-    if module_source_path_raw is not None:
-      module_source_path = Path(module_source_path_raw)
-    else:
-      module_source_path = None
-
-    if (module_source_path is None) and not (module_filename.startswith('<') and module_filename.endswith('>')):
-      module_source_path = Path(module_filename)
-
-    if module_instance is not None:
-      try:
-        module_source = inspect.getsource(module_instance)
-      except OSError:
-        module_source = None
-    else:
-      module_source = None
-
-    if (module_source is None) and (module_source_path is not None):
-      module_source = try_read_text(module_source_path)
-
-
-    ipython = get_ipython()
-
-    if (module_source_path is not None) and (ipython is not None):
-      module_label = ipython.compile.format_code_name(module_source_path)
-    else:
-      module_label = None
-
-
-    if module_source is not None:
-      try:
-        tree = ast.parse(module_source)
-      except SyntaxError:
-        tree = None
-    else:
-      tree = None
-
-    # Get relative path and name
-
-    module_kind: ModuleKind
-
-    if module_source_path is not None:
-      relative_path, in_syspath = get_relative_path(module_source_path)
-      module_kind = 'lib' if in_syspath else 'user'
-    else:
-      relative_path = None
-      module_kind = 'user'
-
-    if module_instance is not None:
-      module_name_segments = tuple(module_instance.__name__.split('.'))
-    elif relative_path is not None:
-      module_name_segments = relative_path.with_suffix('').parts
-
-      if module_name_segments[-1] == '__init__':
-        module_name_segments = module_name_segments[:-1]
-    else:
-      module_name_segments = None
-
-    if module_name_segments is not None:
-      if module_name_segments in (
-        ['importlib', '_bootstrap'],
-        ['importlib', '_bootstrap_external'],
-        ['runpy'],
-      ):
-        module_kind = 'internal'
-      elif module_name_segments[0] in sys.stdlib_module_names:
-        module_kind = 'std'
-
-    env = ModuleEnvironment(
-      ast=tree,
-      instance=module_instance,
-      kind=module_kind,
-      label=module_label,
-      name_segments=module_name_segments,
-      path=module_source_path,
-      source=module_source,
-      relative_path=relative_path,
-    )
-
-    # if module_instance is not None:
-    #   env = get_env_from_module_instance(module_instance)
-    # else:
-      # module_source_path = inspect.getsourcefile(frame_code)
-
-    #   if module_source_path is not None:
-    #     env = get_env_from_module_path(Path(module_source_path))
-    #   else:
-    #     env = LabeledEnvironment(label=module_filename)
-
-    # env = LabeledEnvironment(label=module_label)
-    # ipython = get_ipython()
-
-    if isinstance(env, ModuleEnvironment) and (env.ast is not None) and (positions is not None):
-      target = identify_node(env.ast, area)
+    if module_info.ast is not None:
+      target = identify_node(module_info.ast, area)
     else:
       target = None
 
     frame = FrameItem(
       area=area,
-      env=env,
+      module=module_info,
       target=target,
       reraise=((tb_index > 0) and (target is not None) and isinstance(target.node, ast.Raise)),
     )
@@ -371,86 +163,6 @@ def extract_tb_frames(start_tb: TracebackType, /):
     frames.append(frame)
 
   return frames
-
-
-@functools.cache
-def get_env_from_module_instance(instance: ModuleType, /):
-  # IPython complains that "<module '__main__'> is a built-in module"
-  return get_env_from_module(
-    instance=instance,
-    path=Path(inspect.getfile(instance)),
-  )
-
-@functools.cache
-def get_env_from_module_path(path: Path, /):
-  return get_env_from_module(
-    instance=None,
-    path=path,
-  )
-
-def get_env_from_module(
-  instance: Optional[ModuleType],
-  path: Path,
-):
-  # Get source
-
-  if instance is not None:
-    try:
-      source = inspect.getsource(instance)
-    except OSError:
-      source = None
-  else:
-    source = None
-
-  if source is None:
-    source = try_read_text(path)
-
-  # Get tree
-
-  if source is not None:
-    try:
-      tree = ast.parse(source)
-    except SyntaxError:
-      tree = None
-  else:
-    tree = None
-
-  # Get relative path and name
-
-  relative_path, in_syspath = get_relative_path(path)
-
-  if instance is not None:
-    name_segments = instance.__name__.split('.')
-  elif relative_path is not None:
-    name_segments = list(relative_path.with_suffix('').parts)
-
-    if name_segments[-1] == '__init__':
-      name_segments = name_segments[:-1]
-  else:
-    name_segments = None
-
-
-  kind: ModuleKind = 'user' if not in_syspath else 'lib'
-
-  if name_segments is not None:
-    if name_segments in (
-      ['importlib', '_bootstrap'],
-      ['importlib', '_bootstrap_external'],
-      ['runpy'],
-    ):
-      kind = 'internal'
-    elif name_segments[0] in sys.stdlib_module_names:
-      kind = 'std'
-
-  return ModuleEnvironment(
-    ast=tree,
-    instance=instance,
-    kind=kind,
-    name_segments=name_segments,
-    path=path,
-    source=source,
-    relative_path=relative_path,
-  )
 
 
 def identify_node(module: ast.Module, area: FrameArea):

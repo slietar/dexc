@@ -1,15 +1,14 @@
 import ast
 import math
 import os
-from pprint import pprint
 import sys
 from dataclasses import dataclass, field
+from pprint import pprint
 from typing import IO, Any, Container, Iterable, Literal, Optional, Sequence
 
 from .compression import Atom
 from .compression.greedy import compress
-from .extract import (ExceptionChain, FrameItem, LabeledEnvironment,
-                      ModuleEnvironment)
+from .extract import ExceptionChain, FrameItem, ModuleInfo
 from .options import Options
 from .util import UnreachableError, find_common_ancestors, reversed_if
 from .vendor import get_ipython
@@ -58,7 +57,7 @@ class Symbols:
     if colorize:
       self.color_bright_black = '\033[90m'
       self.color_italic = '\033[3m'
-      self.color_orange = '\033[38;5;202m'
+      self.color_orange = '\033[38;5;208m'
       self.color_red = '\033[31m'
       self.color_reset = '\033[0m'
       self.color_underline = '\033[4m'
@@ -103,17 +102,15 @@ def aggregate_frames(frames: Iterable[FrameItem], options: Options):
   aggregated_frames = list[AggregatedFrame]()
 
   for frame in frames:
-    match frame.env:
-      case LabeledEnvironment():
-        aggregated_frames.append(frame)
-      case ModuleEnvironment(kind='internal') if not options.display_internal_frames:
+    match frame.module:
+      case ModuleInfo(kind='internal') if not options.display_internal_frames:
         pass
-      case ModuleEnvironment(kind=('internal' | 'lib' | 'std'), name_segments=[package_name, *_]) if options.aggregate_nonuser_frames:
+      case ModuleInfo(kind=('internal' | 'lib' | 'std'), name_segments=[package_name, *_]) if options.aggregate_nonuser_frames:
         if not (aggregated_frames and isinstance(aggregated_frames[-1], LibraryFrameAggregate) and (aggregated_frames[-1].package_name == package_name)):
           aggregated_frames.append(LibraryFrameAggregate(package_name=package_name))
 
         aggregated_frames[-1].frames.append(frame) # type: ignore
-      case ModuleEnvironment():
+      case ModuleInfo():
         aggregated_frames.append(frame)
       case _:
         raise UnreachableError
@@ -363,29 +360,25 @@ def render_frames(
             if target_name is not None:
               file.write(f'{symbols.color_underline}{target_name}{symbols.color_reset}{color} ')
 
-          match frame.env:
-            case LabeledEnvironment(label=None):
-              file.write(f'in unknown fragment')
-            case LabeledEnvironment(label):
-              file.write(f'in fragment {label}')
-            case ModuleEnvironment():
-              if frame.env.name_segments is not None:
-                file.write(f'in {'.'.join(frame.env.name_segments)}')
-              else:
-                file.write('in unknown module')
+          if frame.module.name_segments is not None:
+            file.write(f'in {'.'.join(frame.module.name_segments)}')
+          elif frame.module.label is not None:
+            file.write(f'in {frame.module.label}')
+          else:
+            file.write('in unknown module')
 
-              if frame.env.relative_path is not None:
-                file.write(' (')
+          if frame.module.relative_path is not None:
+            file.write(' (')
 
-                if frame.env.kind == 'user':
-                  file.write('./')
+            if frame.module.kind == 'user':
+              file.write('./')
 
-                file.write(f'{frame.env.relative_path}')
+            file.write(f'{frame.module.relative_path}')
 
-                if frame.area.line_start is not None:
-                  file.write(f':{frame.area.line_start}')
+            if frame.area.line_start is not None:
+              file.write(f':{frame.area.line_start}')
 
-                file.write(')')
+            file.write(')')
 
           if frame.reraise:
             file.write(' [re-raise]')
@@ -407,10 +400,9 @@ def render_frames(
             assert line_end is not None
             assert col_start is not None
             assert col_end is not None
-            assert isinstance(frame.env, ModuleEnvironment)
-            assert frame.env.source is not None
+            assert frame.module.source is not None
 
-            code_lines = frame.env.source.splitlines()
+            code_lines = frame.module.source.splitlines()
 
 
             # Compute target line range
@@ -512,9 +504,8 @@ def render_frames(
           assert atom.repeat_count == 1
 
           def map_frame(frame: FrameItem):
-            assert isinstance(frame.env, ModuleEnvironment)
-            assert frame.env.name_segments is not None
-            return frame.env.name_segments
+            assert frame.module.name_segments is not None
+            return frame.module.name_segments
 
           module_segments_list = [map_frame(frame) for frame in agg_frames]
 
