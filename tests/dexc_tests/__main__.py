@@ -4,6 +4,10 @@ from pathlib import Path
 import dexc
 import dexc
 from dexc.options import Options
+from dexc.warnings import install_warnings
+
+
+install_warnings()
 
 
 def run_test(module_name: str):

@@ -1,10 +1,28 @@
 import sys
 from pathlib import Path
+from types import TracebackType
 from typing import Iterable, Optional, Reversible, Sequence
 
 
 class UnreachableError(Exception):
   pass
+
+
+def create_tb(start_depth: int = 0):
+  tb: Optional[TracebackType] = None
+  depth = start_depth + 2
+
+  while True:
+    try:
+      frame = sys._getframe(depth)
+      depth += 1
+    except ValueError:
+      break
+
+    tb = TracebackType(tb, frame, frame.f_lasti, frame.f_lineno)
+
+  return tb
+
 
 def find_common_ancestors[T](items: Iterable[Iterable[T]], /) -> Sequence[T]:
   items_iter = iter(items)

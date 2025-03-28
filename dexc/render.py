@@ -1,8 +1,9 @@
 import ast
 import math
 import os
+import sys
 from dataclasses import dataclass, field
-from typing import IO, Container, Iterable, Literal, Sequence
+from typing import IO, Container, Iterable, Literal, Optional, Sequence
 
 from .compression import Atom
 from .compression.greedy import compress
@@ -27,9 +28,11 @@ def get_common_indentation(lines: list[str], /):
 class Symbols:
   color_bright_black: str
   color_italic: str
+  color_orange: str
   color_red: str
   color_reset: str
   color_underline: str
+  color_yellow: str
 
   box_down_right: str
   box_horizontal: str
@@ -54,15 +57,35 @@ class Symbols:
     if colorize:
       self.color_bright_black = '\033[90m'
       self.color_italic = '\033[3m'
+      self.color_orange = '\033[38;5;202m'
       self.color_red = '\033[31m'
       self.color_reset = '\033[0m'
       self.color_underline = '\033[4m'
+      self.color_yellow = '\033[33m'
     else:
       self.color_bright_black = ''
       self.color_italic = ''
+      self.color_orange = ''
       self.color_red = ''
       self.color_reset = ''
       self.color_underline = ''
+      self.color_yellow = ''
+
+  @classmethod
+  def from_file(cls, file: IO[str], options: Options):
+    colorize = options.colorize or (
+      (options.colorize is None) and
+      (not os.environ.get('NO_COLOR')) and
+      (file.isatty() or (
+        (file == sys.stderr) and
+        (get_ipython() is not None))
+      )
+    )
+
+    return cls(
+      ascii_only=options.ascii_only,
+      colorize=colorize,
+    )
 
 
 @dataclass(slots=True)
@@ -100,16 +123,21 @@ def render(
   chain: ExceptionChain,
   file: IO[str],
   options: Options,
+  prefix: str = '',
   profile: RenderProfile = 'default',
+  _symbols: Optional[Symbols] = None,
 ):
+  file.write(prefix)
+
   render_item(
     chain,
     file,
     options,
     floating=False,
     indent='',
-    prefix='',
+    prefix=prefix,
     profile=profile,
+    symbols=(_symbols if _symbols is not None else Symbols.from_file(file, options)),
   )
 
 
@@ -122,15 +150,9 @@ def render_item(
   indent: str,
   prefix: str,
   profile: RenderProfile,
+  symbols: Symbols,
 ):
-  colorize = (options.colorize == True) or (
-    (options.colorize is None) and
-    (not os.environ.get('NO_COLOR')) and
-    (file.isatty() or (get_ipython() is not None))
-  )
-
   newline_required = False
-  symbols = Symbols(ascii_only=options.ascii_only, colorize=colorize)
 
   for item, relation in zip(chain.items[::-1], [None, *chain.relations[::-1]]) if options.chain_origin_on_top else zip(chain.items, [None, *chain.relations]):
     if newline_required:
@@ -229,9 +251,10 @@ def render_item(
         # item.frames,
         # [],
         file,
-        symbols,
         options,
         prefix=f'{current_prefix + current_indent}{'  ' if not floating else ''}',
+        profile=profile,
+        symbols=symbols,
         trace_indices=trace_indices,
       )
 
@@ -255,6 +278,7 @@ def render_item(
         indent=child_indent,
         prefix=child_prefix,
         profile=profile,
+        symbols=symbols,
       )
 
   return newline_required
@@ -263,10 +287,11 @@ def render_item(
 def render_frames(
   atoms: Sequence[Atom[AggregatedFrame, AggregatedFrame]],
   file: IO[str],
-  symbols: Symbols,
   options: Options,
   *,
   prefix: str,
+  profile: RenderProfile,
+  symbols: Symbols,
   trace_indices: Container[tuple[int, int]],
 ):
   # Additional options
@@ -463,7 +488,15 @@ def render_frames(
 
               trace += f'{frame_prefix}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
               trace += frame_prefix + indent + ' ' * (line_number_width + 1 + anchor_start_sub)
-              trace += symbols.color_red
+
+              match profile:
+                case 'default':
+                  trace += symbols.color_red
+                case 'warning':
+                  trace += symbols.color_orange
+                case _:
+                  raise UnreachableError
+
               trace += '^' * (anchor_end_sub - anchor_start_sub)
               trace += symbols.color_reset + '\n'
 
