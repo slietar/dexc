@@ -1,8 +1,12 @@
 import ast
 import math
 import os
-from dataclasses import dataclass
-from typing import IO, Sequence
+from dataclasses import dataclass, field
+from typing import IO, Container, Iterable, Literal, Optional, Sequence
+
+from .compression import Atom
+
+from .util import UnreachableError, reversed_if
 
 from .compression.greedy import compress
 from .extract import (ExceptionChain, FrameItem, LabeledEnvironment,
@@ -63,10 +67,53 @@ class Symbols:
       self.color_underline = ''
 
 
+@dataclass(slots=True)
+class LibraryFrameAggregate:
+  module_name: str
+  frames: list[FrameItem] = field(default_factory=list)
+
+@dataclass(slots=True)
+class SystemFrameAggregate:
+  frames: list[FrameItem] = field(default_factory=list)
+
+type AggregatedFrame = FrameItem | LibraryFrameAggregate | SystemFrameAggregate
+
+def aggregate_frames(frames: Iterable[FrameItem], /):
+  aggregated_frames = list[AggregatedFrame]()
+
+  for frame in frames:
+    match frame.env:
+      case LabeledEnvironment(label=None):
+        aggregated_frames.append(frame)
+      case ModuleEnvironment(kind='internal'):
+        pass
+      case ModuleEnvironment(kind='lib', name=name) if isinstance(name, str):
+        first_name = name.split('.', maxsplit=1)[0]
+
+        if not (aggregated_frames and isinstance(aggregated_frames[-1], LibraryFrameAggregate) and (aggregated_frames[-1].module_name == first_name)):
+          aggregated_frames.append(LibraryFrameAggregate(module_name=first_name))
+
+        aggregated_frames[-1].frames.append(frame) # type: ignore
+      case ModuleEnvironment(kind='std'):
+        if not (aggregated_frames and isinstance(aggregated_frames[-1], SystemFrameAggregate)):
+          aggregated_frames.append(SystemFrameAggregate())
+
+        aggregated_frames[-1].frames.append(frame) # type: ignore
+      case ModuleEnvironment(kind='user', name=name):
+        aggregated_frames.append(frame)
+      case _:
+        raise UnreachableError
+
+  return aggregated_frames
+
+
+type RenderProfile = Literal['default', 'warning']
+
 def render(
   chain: ExceptionChain,
   file: IO[str],
   options: Options,
+  profile: RenderProfile = 'default',
 ):
   render_item(
     chain,
@@ -75,6 +122,7 @@ def render(
     floating=False,
     indent='',
     prefix='',
+    profile=profile,
   )
 
 
@@ -86,6 +134,7 @@ def render_item(
   floating: bool,
   indent: str,
   prefix: str,
+  profile: RenderProfile,
 ):
   colorize = (options.colorize == True) or (
     (options.colorize is None) and
@@ -172,13 +221,50 @@ def render_item(
       if newline_required:
         file.write(f'{current_prefix}\n')
 
+      # Reversing here so we don't have to reverse every atom later on
+      if options.inner_frame_on_top:
+        frames = item.frames
+      else:
+        frames = reversed(item.frames)
+
+      aggregated_frames = aggregate_frames(frames)
+      atoms = compress(aggregated_frames, backwards=(not options.compression_first_on_top))
+
+      # aggregated_frames = aggregate_frames(item.frames)
+      # atoms = compress(
+      #   aggregated_frames,
+      #   backwards=(options.inner_frame_on_top != (not options.compression_first_on_top))
+      # )
+
+      trace_budget = 3
+      trace_indices = set[tuple[int, int]]()
+
+      # atoms_iter = list(enumerate(atoms))
+
+      # if not options.inner_frame_on_top:
+      #   atoms_iter = reversed(atoms_iter)
+
+      for atom_inner_index, (atom_display_index, atom) in enumerate(reversed_if(list(enumerate(atoms)), not options.inner_frame_on_top)):
+        for agg_frame_index, agg_frame in reversed_if(list(enumerate(atom.realization)), not options.inner_frame_on_top):
+          if isinstance(agg_frame, FrameItem) and agg_frame.traceable and (len(trace_indices) < trace_budget):
+            trace_indices.add((atom_display_index, agg_frame_index))
+
+          # explicit_raise = isinstance(agg_frame, FrameItem) and (agg_frame.target is not None) and isinstance(agg_frame.target.node, ast.Raise)
+
+      # # from pprint import pprint
+      # print(len(item_frames))
+      # print(trace_indices)
+
+
       newline_required = render_frames(
-        item.frames,
+        atoms,
+        # item.frames,
         # [],
         file,
         symbols,
         options,
         prefix=f'{current_prefix + current_indent}{'  ' if not floating else ''}',
+        trace_indices=trace_indices,
       )
 
 
@@ -200,30 +286,43 @@ def render_item(
         floating=True,
         indent=child_indent,
         prefix=child_prefix,
+        profile=profile,
       )
 
   return newline_required
 
 
-def render_frames(item_frames: Sequence[FrameItem], file: IO[str], symbols: Symbols, options: Options, *, prefix: str):
+def render_frames(
+  atoms: Sequence[Atom[AggregatedFrame, AggregatedFrame]],
+  file: IO[str],
+  symbols: Symbols,
+  options: Options,
+  *,
+  prefix: str,
+  trace_indices: Container[tuple[int, int]],
+):
   # Additional options
   indent = '  '
   inset_repeat_box = True
   skip_newline_on_highlights_at_trace_ends = True
 
-  frames = list(enumerate(item_frames))
+  # frames = list(enumerate(item_frames))
 
-  if not options.inner_frame_on_top:
-    frames = list(reversed(frames))
+  # if not options.inner_frame_on_top:
+  #   frames = list(reversed(frames))
 
-  atoms = compress(frames, backwards=(not options.compression_first_on_top), key=(lambda x: x[1]))
+  # # from pprint import pprint
+  # # # print(len(item_frames))
+  # # pprint(aggregate_frames(item_frames))
+
+  # atoms = compress(frames, backwards=(not options.compression_first_on_top), key=(lambda x: x[1]))
   # cum_frame_count = [0, *itertools.accumulate(len(atom.keys) for atom in compressed.atoms[:-1])]
 
   # Whether a newline is required before the next frame
   newline_required = False
 
   for atom_index, atom in enumerate(atoms):
-    atom_correct_index = atom_index if options.inner_frame_on_top else len(atoms) - atom_index - 1
+    # atom_correct_index = atom_index if options.inner_frame_on_top else len(atoms) - atom_index - 1
     repeat_box = (atom.repeat_count > 1) and (len(atom.keys) > 1)
 
     if repeat_box and (atom_index > 0):
@@ -245,178 +344,183 @@ def render_frames(item_frames: Sequence[FrameItem], file: IO[str], symbols: Symb
       frame_prefix = prefix
       repeat_box_prefix = None
 
-    for frame_index, frame in atom.realization[:len(atom.keys)]:
+    for agg_frame_index, agg_frame in enumerate(atom.realization[:len(atom.keys)]):
       if newline_required:
         file.write(frame_prefix + '\n')
 
-      line_start = frame.area.line_start
-      line_end = frame.area.line_end
-      col_start = frame.area.col_start
-      col_end = frame.area.col_end
-
-      if isinstance(frame.env, ModuleEnvironment) and (
-        (atom_correct_index == 0) or (
-          (frame.env.kind == 'user') and
-          (atom_correct_index < 3)
-        )
-      ) and (
-        (frame.env.source is not None) and
-        (line_start is not None) and
-        (line_end is not None) and
-        (col_start is not None) and
-        (col_end is not None)
-      ):
-        code_lines = frame.env.source.splitlines()
-
-        # Compute target line range
-
-        # Ensure there are no more than max_total_lines target lines
-        if line_end - line_start + 1 > options.max_target_lines:
-          # The "more lines" message always mentions at least 2 lines
-          line_end_cut = line_start + options.max_target_lines - 2
-        else:
-          line_end_cut = line_end
-
-
-        # Compute context line range
-
-        context_line_start = max(line_start - options.max_context_lines_before, 1)
-        context_line_end = min(line_end + options.max_context_lines_after, len(code_lines))
-
-        while (context_line_start < line_start) and (not (context_line := code_lines[context_line_start - 1]) or context_line.isspace()):
-          context_line_start += 1
-
-        # This must be done beforehand in order to calculate the maximum line width
-        while (context_line_end > line_end) and (not (context_line := code_lines[context_line_end - 1]) or context_line.isspace()):
-          context_line_end -= 1
-
-
-        # Compute line parameters
-
-        # Also includes cut target lines
-        displayed_lines = code_lines[(context_line_start - 1):context_line_end]
-        common_indentation = get_common_indentation(displayed_lines) if options.remove_common_indentation else 0
-
-        line_number_width = get_integer_width(context_line_end)
-
-
-        # Display context before target
-
-        trace = ''
-
-        for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
-          line_number = context_line_start + rel_line_index
-          trace += f'{frame_prefix}{symbols.color_bright_black}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}{symbols.color_reset}\n'
-
-
-        # Display target
-
-        target_lines = code_lines[(line_start - 1):line_end_cut]
-
-        for rel_line_index, line in enumerate(target_lines):
-          line_number = line_start + rel_line_index
-          line_indent = get_line_indentation(line) if options.skip_indentation_highlight else 0
-
-          if line_number == line_start:
-            anchor_start = col_start
-
-            if line_start == line_end:
-              anchor_end = col_end
-            else:
-              anchor_end = len(line)
-          elif line_number == line_end:
-            anchor_start = line_indent
-            anchor_end = col_end
-          else:
-            anchor_start = line_indent
-            anchor_end = len(line)
-
-          anchor_start_sub = max(anchor_start - common_indentation, 0)
-          anchor_end_sub = max(anchor_end - common_indentation, 0)
-
-          trace += f'{frame_prefix}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
-          trace += frame_prefix + indent + ' ' * (line_number_width + 1 + anchor_start_sub)
-          trace += symbols.color_red
-          trace += '^' * (anchor_end_sub - anchor_start_sub)
-          trace += symbols.color_reset + '\n'
-
-        if line_end_cut != line_end:
-          trace += f'{frame_prefix}{indent}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]\n'
-
-
-        # Display context after target
-
-        for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
-          line_number = line_end + rel_line_index + 1
-          trace += f'{frame_prefix}{symbols.color_bright_black}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}{symbols.color_reset}\n'
-
-        # The line of ^^^^ can be considered a newline
-        newline_required = (line_end != context_line_end) or (line_end_cut != line_end) or (not skip_newline_on_highlights_at_trace_ends)
-      else:
-        newline_required = False
-        trace = None
-
-
-      color = symbols.color_bright_black if not (
-        (isinstance(frame.env, ModuleEnvironment) and (frame.env.kind == 'user')) or
-        (frame_index == 0)
-      ) else ''
-
       file.write(frame_prefix)
-      file.write(color)
 
-      if frame.target is not None:
-        target_name = None
+      match agg_frame:
+        case FrameItem():
+          frame = agg_frame
 
-        for node in [frame.target.node, *frame.target.parents[::-1]]:
-          match node:
-            case ast.AsyncFunctionDef(name=name) | ast.FunctionDef(name=name):
-              file.write('at function ')
-              target_name = name
-              break
-            case ast.ClassDef(name=name):
-              file.write('at class ')
-              target_name = name
-              break
-            case ast.Module():
-              file.write(f'at module ')
-              break
+          if frame.target is not None:
+            target_name = None
 
-        if target_name is not None:
-          file.write(f'{symbols.color_underline}{target_name}{symbols.color_reset} {color}')
+            for node in [frame.target.node, *frame.target.parents[::-1]]:
+              match node:
+                case ast.AsyncFunctionDef(name=name) | ast.FunctionDef(name=name):
+                  file.write('at function ')
+                  target_name = name
+                  break
+                case ast.ClassDef(name=name):
+                  file.write('at class ')
+                  target_name = name
+                  break
+                case ast.Module():
+                  file.write(f'at module ')
+                  break
 
-      match frame.env:
-        case LabeledEnvironment(label=None):
-          file.write(f'in unknown fragment')
-        case LabeledEnvironment(label):
-          file.write(f'in fragment {label}')
-        case ModuleEnvironment():
-          if frame.env.name is not None:
-            file.write(f'in {frame.env.name}')
-          else:
-            file.write('in unknown module')
+            if target_name is not None:
+              file.write(f'{symbols.color_underline}{target_name}{symbols.color_reset} ')
 
-          if frame.env.relative_path is not None:
-            file.write(' (')
+          match frame.env:
+            case LabeledEnvironment(label=None):
+              file.write(f'in unknown fragment')
+            case LabeledEnvironment(label):
+              file.write(f'in fragment {label}')
+            case ModuleEnvironment():
+              if frame.env.name is not None:
+                file.write(f'in {frame.env.name}')
+              else:
+                file.write('in unknown module')
 
-            if frame.env.kind == 'user':
-              file.write('./')
+              if frame.env.relative_path is not None:
+                file.write(' (')
 
-            file.write(f'{frame.env.relative_path}')
+                if frame.env.kind == 'user':
+                  file.write('./')
 
-            if (frame.env.kind != 'internal') and (line_start is not None):
-              file.write(f':{line_start}')
+                file.write(f'{frame.env.relative_path}')
 
-            file.write(')')
+                if (frame.env.kind != 'internal') and (frame.area.line_start is not None):
+                  file.write(f':{frame.area.line_start}')
 
-      if frame.reraise:
-        file.write(' [re-raise]')
+                file.write(')')
+
+          if frame.reraise:
+            file.write(' [re-raise]')
+
+          if (atom_index, agg_frame_index) in trace_indices:
+            frame = agg_frame
+
+            line_start = frame.area.line_start
+            line_end = frame.area.line_end
+            col_start = frame.area.col_start
+            col_end = frame.area.col_end
+
+            assert line_start is not None
+            assert line_end is not None
+            assert col_start is not None
+            assert col_end is not None
+            assert isinstance(frame.env, ModuleEnvironment)
+            assert frame.env.source is not None
+
+            code_lines = frame.env.source.splitlines()
+
+
+            # Compute target line range
+
+            # Ensure there are no more than max_total_lines target lines
+            if line_end - line_start + 1 > options.max_target_lines:
+              # The "more lines" message always mentions at least 2 lines
+              line_end_cut = line_start + options.max_target_lines - 2
+            else:
+              line_end_cut = line_end
+
+
+            # Compute context line range
+
+            context_line_start = max(line_start - options.max_context_lines_before, 1)
+            context_line_end = min(line_end + options.max_context_lines_after, len(code_lines))
+
+            while (context_line_start < line_start) and (not (context_line := code_lines[context_line_start - 1]) or context_line.isspace()):
+              context_line_start += 1
+
+            # This must be done beforehand in order to calculate the maximum line width
+            while (context_line_end > line_end) and (not (context_line := code_lines[context_line_end - 1]) or context_line.isspace()):
+              context_line_end -= 1
+
+
+            # Compute line parameters
+
+            # Also includes cut target lines
+            displayed_lines = code_lines[(context_line_start - 1):context_line_end]
+            common_indentation = get_common_indentation(displayed_lines) if options.remove_common_indentation else 0
+
+            line_number_width = get_integer_width(context_line_end)
+
+
+            # Display context before target
+
+            trace = ''
+
+            for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
+              line_number = context_line_start + rel_line_index
+              trace += f'{frame_prefix}{symbols.color_bright_black}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}{symbols.color_reset}\n'
+
+
+            # Display target
+
+            target_lines = code_lines[(line_start - 1):line_end_cut]
+
+            for rel_line_index, line in enumerate(target_lines):
+              line_number = line_start + rel_line_index
+              line_indent = get_line_indentation(line) if options.skip_indentation_highlight else 0
+
+              if line_number == line_start:
+                anchor_start = col_start
+
+                if line_start == line_end:
+                  anchor_end = col_end
+                else:
+                  anchor_end = len(line)
+              elif line_number == line_end:
+                anchor_start = line_indent
+                anchor_end = col_end
+              else:
+                anchor_start = line_indent
+                anchor_end = len(line)
+
+              anchor_start_sub = max(anchor_start - common_indentation, 0)
+              anchor_end_sub = max(anchor_end - common_indentation, 0)
+
+              trace += f'{frame_prefix}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
+              trace += frame_prefix + indent + ' ' * (line_number_width + 1 + anchor_start_sub)
+              trace += symbols.color_red
+              trace += '^' * (anchor_end_sub - anchor_start_sub)
+              trace += symbols.color_reset + '\n'
+
+            if line_end_cut != line_end:
+              trace += f'{frame_prefix}{indent}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]\n'
+
+
+            # Display context after target
+
+            for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
+              line_number = line_end + rel_line_index + 1
+              trace += f'{frame_prefix}{symbols.color_bright_black}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}{symbols.color_reset}\n'
+
+            # The line of ^^^^ can be considered a newline
+            newline_required = (line_end != context_line_end) or (line_end_cut != line_end) or (not skip_newline_on_highlights_at_trace_ends)
+          # else:
+          #   newline_required = False
+          #   trace = None
+
+        case LibraryFrameAggregate(module_name=name):
+          file.write(f'{symbols.color_bright_black}at module {name}{symbols.color_reset}\n')
+          newline_required = False
+
+        case _:
+          file.write(f'{symbols.color_bright_black}at internal module{symbols.color_reset}\n')
+
 
       if (atom.repeat_count > 1) and (len(atom.keys) == 1):
         file.write(f' [repeated {atom.repeat_count} times]')
 
       # Trace ends with a newline
-      file.write(f'{symbols.color_reset}\n{trace or ''}')
+      # file.write(f'{symbols.color_reset}\n{trace or ''}')
+      file.write('\n')
 
     if repeat_box_prefix is not None:
       file.write(f'{repeat_box_prefix}{symbols.box_up_right}{symbols.box_horizontal * 3}\n')

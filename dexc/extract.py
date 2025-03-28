@@ -52,6 +52,11 @@ class FrameItem:
   target: Optional[AstTarget]
   reraise: bool
 
+  @property
+  def traceable(self):
+    # TODO: Add conditions on area
+    return isinstance(self.env, ModuleEnvironment) and (self.env.source is not None)
+
 
 type ExceptionChainRelation = Literal['cause', 'context']
 
@@ -293,7 +298,7 @@ def get_env_from_module(
 
   kind: ModuleKind = 'user' if not in_syspath else 'lib'
 
-  if (name is not None) and (name.split('.', maxsplit=1)[0] in sys.builtin_module_names):
+  if (name is not None) and (name.split('.', maxsplit=1)[0] in sys.stdlib_module_names):
     kind = 'std'
 
   return ModuleEnvironment(
