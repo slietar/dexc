@@ -26,7 +26,7 @@ class ModuleEnvironment:
   ast: Optional[ast.Module]
   instance: Optional[ModuleType]
   kind: ModuleKind
-  name: Optional[str]
+  name_segments: Optional[list[str]]
   path: Optional[Path]
   source: Optional[str] = field(repr=False)
   relative_path: Optional[Path]
@@ -51,6 +51,16 @@ class FrameItem:
   env: Environment
   target: Optional[AstTarget]
   reraise: bool
+
+  @property
+  def important(self):
+    match self.env:
+      case ModuleEnvironment(kind='user'):
+        return True
+      case LabeledEnvironment():
+        return True
+      case _:
+        return False
 
   @property
   def traceable(self):
@@ -107,18 +117,10 @@ def extract_exc_chain(start_exc: BaseException, /):
 
 
 def extract_exc_frames(exc: BaseException, /):
-  current_tb = exc.__traceback__
-  tbs = list[TracebackType]()
-
-  while current_tb:
-    tbs.append(current_tb)
-    current_tb = current_tb.tb_next
-
-  # Detect syntax error
-
   # Inner frames are first
   frames = list[FrameItem]()
 
+  # Detect syntax error
   if isinstance(exc, SyntaxError):
     if exc.filename is not None:
       source_path = Path(exc.filename)
@@ -146,8 +148,24 @@ def extract_exc_frames(exc: BaseException, /):
 
     frames.append(frame)
 
+  if exc.__traceback__:
+    frames += extract_tb_frames(exc.__traceback__)
+
+  return frames
+
+
+def extract_tb_frames(start_tb: TracebackType, /):
+  current_tb = start_tb
+  tbs = list[TracebackType]()
+
+  while current_tb:
+    tbs.append(current_tb)
+    current_tb = current_tb.tb_next
+
 
   # Extract frames
+
+  frames = list[FrameItem]()
 
   for tb_index, tb in enumerate(reversed(tbs)):
     frame = tb.tb_frame
@@ -289,23 +307,33 @@ def get_env_from_module(
   relative_path, in_syspath = get_relative_path(path)
 
   if instance is not None:
-    name = instance.__name__
+    name_segments = instance.__name__.split('.')
   elif relative_path is not None:
-    name = relative_path.with_suffix('').as_posix().replace('/', '.')
+    name_segments = list(relative_path.with_suffix('').parts)
+
+    if name_segments[-1] == '__init__':
+      name_segments = name_segments[:-1]
   else:
-    name = None
+    name_segments = None
 
 
   kind: ModuleKind = 'user' if not in_syspath else 'lib'
 
-  if (name is not None) and (name.split('.', maxsplit=1)[0] in sys.stdlib_module_names):
-    kind = 'std'
+  if name_segments is not None:
+    if name_segments in (
+      ['runpy'],
+      ['importlib', '_bootstrap'],
+      ['importlib', '_bootstrap_external'],
+    ):
+      kind = 'internal'
+    elif name_segments[0] in sys.stdlib_module_names:
+      kind = 'std'
 
   return ModuleEnvironment(
     ast=tree,
     instance=instance,
     kind=kind,
-    name=name,
+    name_segments=name_segments,
     path=path,
     source=source,
     relative_path=relative_path,

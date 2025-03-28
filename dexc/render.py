@@ -2,16 +2,14 @@ import ast
 import math
 import os
 from dataclasses import dataclass, field
-from typing import IO, Container, Iterable, Literal, Optional, Sequence
+from typing import IO, Container, Iterable, Literal, Sequence
 
 from .compression import Atom
-
-from .util import UnreachableError, reversed_if
-
 from .compression.greedy import compress
 from .extract import (ExceptionChain, FrameItem, LabeledEnvironment,
                       ModuleEnvironment)
 from .options import Options
+from .util import UnreachableError, find_common_ancestors, reversed_if
 from .vendor import get_ipython
 
 
@@ -69,37 +67,26 @@ class Symbols:
 
 @dataclass(slots=True)
 class LibraryFrameAggregate:
-  module_name: str
+  package_name: str
   frames: list[FrameItem] = field(default_factory=list)
 
-@dataclass(slots=True)
-class SystemFrameAggregate:
-  frames: list[FrameItem] = field(default_factory=list)
+type AggregatedFrame = FrameItem | LibraryFrameAggregate
 
-type AggregatedFrame = FrameItem | LibraryFrameAggregate | SystemFrameAggregate
-
-def aggregate_frames(frames: Iterable[FrameItem], /):
+def aggregate_frames(frames: Iterable[FrameItem], options: Options):
   aggregated_frames = list[AggregatedFrame]()
 
   for frame in frames:
     match frame.env:
-      case LabeledEnvironment(label=None):
+      case LabeledEnvironment():
         aggregated_frames.append(frame)
-      case ModuleEnvironment(kind='internal'):
+      case ModuleEnvironment(kind='internal') if not options.display_internal_frames:
         pass
-      case ModuleEnvironment(kind='lib', name=name) if isinstance(name, str):
-        first_name = name.split('.', maxsplit=1)[0]
-
-        if not (aggregated_frames and isinstance(aggregated_frames[-1], LibraryFrameAggregate) and (aggregated_frames[-1].module_name == first_name)):
-          aggregated_frames.append(LibraryFrameAggregate(module_name=first_name))
+      case ModuleEnvironment(kind=('internal' | 'lib' | 'std'), name_segments=[package_name, *_]) if options.aggregate_nonuser_frames:
+        if not (aggregated_frames and isinstance(aggregated_frames[-1], LibraryFrameAggregate) and (aggregated_frames[-1].package_name == package_name)):
+          aggregated_frames.append(LibraryFrameAggregate(package_name=package_name))
 
         aggregated_frames[-1].frames.append(frame) # type: ignore
-      case ModuleEnvironment(kind='std'):
-        if not (aggregated_frames and isinstance(aggregated_frames[-1], SystemFrameAggregate)):
-          aggregated_frames.append(SystemFrameAggregate())
-
-        aggregated_frames[-1].frames.append(frame) # type: ignore
-      case ModuleEnvironment(kind='user', name=name):
+      case ModuleEnvironment():
         aggregated_frames.append(frame)
       case _:
         raise UnreachableError
@@ -227,34 +214,15 @@ def render_item(
       else:
         frames = reversed(item.frames)
 
-      aggregated_frames = aggregate_frames(frames)
+      aggregated_frames = aggregate_frames(frames, options)
       atoms = compress(aggregated_frames, backwards=(not options.compression_first_on_top))
 
-      # aggregated_frames = aggregate_frames(item.frames)
-      # atoms = compress(
-      #   aggregated_frames,
-      #   backwards=(options.inner_frame_on_top != (not options.compression_first_on_top))
-      # )
-
-      trace_budget = 3
       trace_indices = set[tuple[int, int]]()
 
-      # atoms_iter = list(enumerate(atoms))
-
-      # if not options.inner_frame_on_top:
-      #   atoms_iter = reversed(atoms_iter)
-
       for atom_inner_index, (atom_display_index, atom) in enumerate(reversed_if(list(enumerate(atoms)), not options.inner_frame_on_top)):
-        for agg_frame_index, agg_frame in reversed_if(list(enumerate(atom.realization)), not options.inner_frame_on_top):
-          if isinstance(agg_frame, FrameItem) and agg_frame.traceable and (len(trace_indices) < trace_budget):
+        for agg_frame_index, agg_frame in reversed_if(list(enumerate(atom.keys)), not options.inner_frame_on_top):
+          if isinstance(agg_frame, FrameItem) and agg_frame.important and agg_frame.traceable and (len(trace_indices) < options.max_traces):
             trace_indices.add((atom_display_index, agg_frame_index))
-
-          # explicit_raise = isinstance(agg_frame, FrameItem) and (agg_frame.target is not None) and isinstance(agg_frame.target.node, ast.Raise)
-
-      # # from pprint import pprint
-      # print(len(item_frames))
-      # print(trace_indices)
-
 
       newline_required = render_frames(
         atoms,
@@ -354,6 +322,9 @@ def render_frames(
         case FrameItem():
           frame = agg_frame
 
+          color = symbols.color_bright_black if not frame.important else ''
+          file.write(color)
+
           if frame.target is not None:
             target_name = None
 
@@ -372,7 +343,7 @@ def render_frames(
                   break
 
             if target_name is not None:
-              file.write(f'{symbols.color_underline}{target_name}{symbols.color_reset} ')
+              file.write(f'{symbols.color_underline}{target_name}{symbols.color_reset}{color} ')
 
           match frame.env:
             case LabeledEnvironment(label=None):
@@ -380,8 +351,8 @@ def render_frames(
             case LabeledEnvironment(label):
               file.write(f'in fragment {label}')
             case ModuleEnvironment():
-              if frame.env.name is not None:
-                file.write(f'in {frame.env.name}')
+              if frame.env.name_segments is not None:
+                file.write(f'in {'.'.join(frame.env.name_segments)}')
               else:
                 file.write('in unknown module')
 
@@ -393,13 +364,18 @@ def render_frames(
 
                 file.write(f'{frame.env.relative_path}')
 
-                if (frame.env.kind != 'internal') and (frame.area.line_start is not None):
+                if frame.area.line_start is not None:
                   file.write(f':{frame.area.line_start}')
 
                 file.write(')')
 
           if frame.reraise:
             file.write(' [re-raise]')
+
+          if (atom.repeat_count > 1) and (len(atom.keys) == 1):
+            file.write(f' [repeated {atom.repeat_count} times]')
+
+          file.write(f'{symbols.color_reset}\n')
 
           if (atom_index, agg_frame_index) in trace_indices:
             frame = agg_frame
@@ -501,26 +477,35 @@ def render_frames(
               line_number = line_end + rel_line_index + 1
               trace += f'{frame_prefix}{symbols.color_bright_black}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}{symbols.color_reset}\n'
 
+            file.write(trace)
+
             # The line of ^^^^ can be considered a newline
             newline_required = (line_end != context_line_end) or (line_end_cut != line_end) or (not skip_newline_on_highlights_at_trace_ends)
-          # else:
-          #   newline_required = False
-          #   trace = None
 
-        case LibraryFrameAggregate(module_name=name):
-          file.write(f'{symbols.color_bright_black}at module {name}{symbols.color_reset}\n')
+        case LibraryFrameAggregate(frames=agg_frames, package_name=name):
+          assert atom.repeat_count == 1
+
+          def map_frame(frame: FrameItem):
+            assert isinstance(frame.env, ModuleEnvironment)
+            assert frame.env.name_segments is not None
+            return frame.env.name_segments
+
+          module_segments_list = [map_frame(frame) for frame in agg_frames]
+
+          agg_name_segments = find_common_ancestors(module_segments_list)
+          module_unique = all(len(name_segments) == len(agg_name_segments) for name_segments in module_segments_list)
+
+          file.write(f'{symbols.color_bright_black}at module{'s' if not module_unique else ''} {'.'.join(agg_name_segments)}{'.*' if not module_unique else ''}')
+
+          if len(agg_frames) > 1:
+            file.write(f' [{len(agg_frames)} frames]')
+
+          file.write(f'{symbols.color_reset}\n')
+
           newline_required = False
 
         case _:
           file.write(f'{symbols.color_bright_black}at internal module{symbols.color_reset}\n')
-
-
-      if (atom.repeat_count > 1) and (len(atom.keys) == 1):
-        file.write(f' [repeated {atom.repeat_count} times]')
-
-      # Trace ends with a newline
-      # file.write(f'{symbols.color_reset}\n{trace or ''}')
-      file.write('\n')
 
     if repeat_box_prefix is not None:
       file.write(f'{repeat_box_prefix}{symbols.box_up_right}{symbols.box_horizontal * 3}\n')

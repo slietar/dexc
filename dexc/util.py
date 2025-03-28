@@ -1,9 +1,31 @@
 import sys
 from pathlib import Path
-from typing import Iterable, Iterator, Optional, Reversible
+from typing import Iterable, Optional, Reversible, Sequence
+
 
 class UnreachableError(Exception):
   pass
+
+def find_common_ancestors[T](items: Iterable[Iterable[T]], /) -> Sequence[T]:
+  items_iter = iter(items)
+
+  try:
+    current_ancestors = list(next(items_iter))
+  except StopIteration:
+    raise ValueError('At least one item is required')
+
+  for item in items_iter:
+    ancestor_index = 0
+
+    for current_ancestor, item_ancestor in zip(current_ancestors, item):
+      if current_ancestor != item_ancestor:
+        break
+
+      ancestor_index += 1
+
+    current_ancestors = current_ancestors[:ancestor_index]
+
+  return current_ancestors
 
 
 def get_relative_path(path: Path, /) -> tuple[Optional[Path], bool]:
