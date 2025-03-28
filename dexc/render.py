@@ -1,9 +1,10 @@
 import ast
 import math
 import os
+from pprint import pprint
 import sys
 from dataclasses import dataclass, field
-from typing import IO, Container, Iterable, Literal, Optional, Sequence
+from typing import IO, Any, Container, Iterable, Literal, Optional, Sequence
 
 from .compression import Atom
 from .compression.greedy import compress
@@ -92,6 +93,9 @@ class Symbols:
 class LibraryFrameAggregate:
   package_name: str
   frames: list[FrameItem] = field(default_factory=list)
+
+  def __hash__(self):
+    return id(self)
 
 type AggregatedFrame = FrameItem | LibraryFrameAggregate
 
@@ -237,12 +241,13 @@ def render_item(
         frames = reversed(item.frames)
 
       aggregated_frames = aggregate_frames(frames, options)
-      atoms = compress(aggregated_frames, backwards=(not options.compression_first_on_top))
+      atoms = compress(aggregated_frames, backwards=(not options.compression_first_on_top), key=hash)
+      # pprint(aggregated_frames)
 
       trace_indices = set[tuple[int, int]]()
 
       for atom_inner_index, (atom_display_index, atom) in enumerate(reversed_if(list(enumerate(atoms)), not options.inner_frame_on_top)):
-        for agg_frame_index, agg_frame in reversed_if(list(enumerate(atom.keys)), not options.inner_frame_on_top):
+        for agg_frame_index, agg_frame in reversed_if(list(enumerate(atom.realization[:len(atom.keys)])), not options.inner_frame_on_top):
           if isinstance(agg_frame, FrameItem) and agg_frame.important and agg_frame.traceable and (len(trace_indices) < options.max_traces):
             trace_indices.add((atom_display_index, agg_frame_index))
 
@@ -285,7 +290,7 @@ def render_item(
 
 
 def render_frames(
-  atoms: Sequence[Atom[AggregatedFrame, AggregatedFrame]],
+  atoms: Sequence[Atom[AggregatedFrame, Any]],
   file: IO[str],
   options: Options,
   *,
@@ -298,18 +303,6 @@ def render_frames(
   indent = '  '
   inset_repeat_box = True
   skip_newline_on_highlights_at_trace_ends = True
-
-  # frames = list(enumerate(item_frames))
-
-  # if not options.inner_frame_on_top:
-  #   frames = list(reversed(frames))
-
-  # # from pprint import pprint
-  # # # print(len(item_frames))
-  # # pprint(aggregate_frames(item_frames))
-
-  # atoms = compress(frames, backwards=(not options.compression_first_on_top), key=(lambda x: x[1]))
-  # cum_frame_count = [0, *itertools.accumulate(len(atom.keys) for atom in compressed.atoms[:-1])]
 
   # Whether a newline is required before the next frame
   newline_required = False
@@ -528,7 +521,7 @@ def render_frames(
           agg_name_segments = find_common_ancestors(module_segments_list)
           module_unique = all(len(name_segments) == len(agg_name_segments) for name_segments in module_segments_list)
 
-          file.write(f'{symbols.color_bright_black}at module{'s' if not module_unique else ''} {'.'.join(agg_name_segments)}{'.*' if not module_unique else ''}')
+          file.write(f'{symbols.color_bright_black}in module{'s' if not module_unique else ''} {'.'.join(agg_name_segments)}{'.*' if not module_unique else ''}')
 
           if len(agg_frames) > 1:
             file.write(f' [{len(agg_frames)} frames]')
@@ -538,7 +531,7 @@ def render_frames(
           newline_required = False
 
         case _:
-          file.write(f'{symbols.color_bright_black}at internal module{symbols.color_reset}\n')
+          raise UnreachableError
 
     if repeat_box_prefix is not None:
       file.write(f'{repeat_box_prefix}{symbols.box_up_right}{symbols.box_horizontal * 3}\n')
