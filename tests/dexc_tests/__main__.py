@@ -15,7 +15,7 @@ def run_test(module_name: str):
     mod = __import__(module_name, fromlist=('a'))
     mod.main()
   except Exception as e:
-    dexc.dump(e, sys.stdout, Options.load()[0])
+    dexc.dump(e, sys.stderr, Options.load()[0])
 
 
 if len(sys.argv) > 1:
@@ -25,5 +25,5 @@ else:
     if '_' in file_path.stem:
       continue
 
-    print(f'-- {file_path.stem} {'-' * 80}')
+    print(f'-- {file_path.stem} {'-' * 80}', file=sys.stderr)
     run_test(f'dexc_tests.{file_path.stem}')

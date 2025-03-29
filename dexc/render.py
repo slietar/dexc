@@ -10,7 +10,7 @@ from .compression import Atom
 from .compression.greedy import compress
 from .extract import ExceptionChain, FrameItem, ModuleInfo
 from .options import Options
-from .util import UnreachableError, find_common_ancestors, reversed_if
+from .util import UnreachableError, find_common_ancestors, reversed_if, split_paragraph
 from .vendor import get_ipython
 
 
@@ -152,10 +152,15 @@ def render_item(
   prefix: str,
   profile: RenderProfile,
   symbols: Symbols,
+  width: int = 80, # Excluding indent and prefix
 ):
   newline_required = False
 
-  for item, relation in zip(chain.items[::-1], [None, *chain.relations[::-1]]) if options.chain_origin_on_top else zip(chain.items, [None, *chain.relations]):
+  for item, relation in (
+    zip(chain.items[::-1], [None, *chain.relations[::-1]])
+    if options.chain_origin_on_top
+    else zip(chain.items, [None, *chain.relations])
+  ):
     if newline_required:
       file.write(f'{prefix}\n')
       newline_required = False
@@ -177,22 +182,26 @@ def render_item(
     # Description
 
     current_prefix, current_indent = (prefix + indent + symbols.box_vertical, ' ') if item.children else (prefix, indent)
+    current_width = (width - 1) if item.children else width
 
     desc = str(item.instance)
     desc_indent = '  ' if not item.children else ''
     desc_lines = desc.splitlines()
+    desc_width = current_width - len(desc_indent)
 
-    file.write(type(item.instance).__name__)
+    exc_type_name = type(item.instance).__name__
+    file.write(exc_type_name)
 
-    if len(desc_lines) > 1:
-      file.write('\n')
+    if desc:
+      if (len(desc_lines) == 1) and (len(desc) <= current_width - len(exc_type_name) - len(': ')):
+        file.write(f': {desc}\n')
+      else:
+        file.write('\n')
 
-      for desc_line in desc_lines:
-        file.write(current_prefix + current_indent + desc_indent + desc_line + '\n')
+        for desc_line in split_paragraph(desc_lines, width=desc_width):
+          file.write(current_prefix + current_indent + desc_indent + desc_line + '\n')
 
-      newline_required = True
-    elif desc:
-      file.write(f': {desc}\n')
+        newline_required = True
     else:
       file.write('\n')
 

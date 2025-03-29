@@ -73,3 +73,38 @@ def reversed_if[T](it: Reversible[T], condition: bool, /) -> Iterable[T]:
     return reversed(it)
   else:
     return it
+
+
+def split_paragraph(lines: Iterable[str], /, *, max_indent: int = 20, width: int): # -> Iterable[str]:
+  for line in lines:
+    line_indent = min(len(line) - len(line.lstrip()), max_indent)
+    current_index = line_indent
+
+    while len(line) - current_index > width - line_indent:
+      split_index = line.rfind(' ', current_index, current_index + width)
+
+      if split_index >= 0:
+        split_line = line[:line_indent] + line[current_index:split_index]
+        current_index = split_index + 1
+      else:
+        split_line = line[:line_indent] + line[current_index:(current_index + width)]
+        current_index = current_index + width
+
+      if split_line:
+        yield split_line
+
+      # print(current_index)
+
+    yield line[:line_indent] + line[current_index:]
+
+
+if __name__ == '__main__':
+  split = list(split_paragraph(['  Lorem ipsum dolor sit amet, consectetur adipiscing elit.\n\nhello'], width=20))
+  split = list(split_paragraph(['abc ef'], width=5))
+  split = list(split_paragraph(['foo   bar'], width=5))
+  split = list(split_paragraph(['foo  bar'], width=5))
+
+  print(split)
+
+  for line in split:
+    print(line)
