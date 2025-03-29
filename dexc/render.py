@@ -129,33 +129,43 @@ def render(
   options: Options,
   prefix: str = '',
   profile: RenderProfile = 'default',
+  width: int = 80,
   _symbols: Optional[Symbols] = None,
 ):
   file.write(prefix)
 
-  render_item(
+  debug = True
+  symbols = _symbols if _symbols is not None else Symbols.from_file(file, options)
+
+  for line_index, (line, line_len) in enumerate(render_item(
     chain,
-    file,
     options,
     floating=False,
-    indent='',
-    prefix=prefix,
     profile=profile,
-    symbols=(_symbols if _symbols is not None else Symbols.from_file(file, options)),
-  )
+    symbols=symbols,
+    width=(width - len(prefix)),
+    width_first=(width - len(prefix)),
+  )):
+    if line_index > 0:
+      file.write(prefix)
+
+    file.write(line)
+
+    if debug and (line_len < width):
+      file.write(symbols.color_bright_black + '·' * (width - line_len) + symbols.color_reset)
+
+    file.write('\n')
 
 
 def render_item(
   chain: ExceptionChain,
-  file: IO[str],
   options: Options,
   *,
   floating: bool,
-  indent: str,
-  prefix: str,
   profile: RenderProfile,
   symbols: Symbols,
-  width: int = 80, # Excluding indent and prefix
+  width: int,
+  width_first: int,
 ):
   newline_required = False
 
@@ -165,51 +175,61 @@ def render_item(
     else zip(chain.items, [None, *chain.relations])
   ):
     if newline_required:
-      file.write(f'{prefix}\n')
+      yield '', 0
       newline_required = False
 
     # Relation
 
     if relation is not None:
-      file.write(f'{prefix}\n{prefix}{symbols.color_italic}[')
+      yield '', 0
 
       match relation:
         case 'cause':
-          file.write('Causing' if options.chain_origin_on_top else 'Caused by')
+          relation_message = 'Causing' if options.chain_origin_on_top else 'Caused by'
         case 'context':
-          file.write('Raising while handling' if options.chain_origin_on_top else 'Raised while handling')
+          relation_message = 'Raising while handling' if options.chain_origin_on_top else 'Raised while handling'
+        case _:
+          raise UnreachableError
 
-      file.write(f']{symbols.color_reset}\n{prefix}\n{prefix}')
+      relation_line = f'[{relation_message}]'
+
+      yield symbols.color_italic + relation_line + symbols.color_reset, len(relation_line)
+      yield '', 0
 
 
     # Description
 
-    current_prefix, current_indent = (prefix + indent + symbols.box_vertical, ' ') if item.children else (prefix, indent)
-    current_width = (width - 1) if item.children else width
+    current_prefix, current_indent = (symbols.box_vertical, ' ') if item.children else ('', '')
+    current_width = width - len(current_prefix) - len(current_indent)
 
     desc = str(item.instance)
     desc_lines = desc.splitlines()
 
     exc_type_name = type(item.instance).__name__
     exc_type_sep = ': '
-    file.write(symbols.color_bold + exc_type_name)
 
-    if desc:
-      if (len(desc_lines) == 1) and (len(desc) <= current_width - len(exc_type_name) - len(exc_type_sep)):
-        file.write(f'{exc_type_sep}{symbols.color_reset}{desc}\n')
-      else:
-        desc_exp_add_indent = '  ' if not item.children else ''
-        desc_exp_width = current_width - len(desc_exp_add_indent)
+    # Non-empty descriptions with a single, short line
+    if desc and (len(desc_lines) == 1) and (len(desc) <= width_first - len(exc_type_name) - len(exc_type_sep)):
+      yield (
+        symbols.color_bold + exc_type_name + exc_type_sep + symbols.color_reset + desc,
+        len(exc_type_name) + len(exc_type_sep) + len(desc),
+      )
+    else:
+      desc_exp_add_indent = '  ' if not item.children else ''
+      desc_exp_width = current_width - len(desc_exp_add_indent)
 
-        file.write(f'{symbols.color_reset}\n')
+      yield (
+        symbols.color_bold + exc_type_name + symbols.color_reset,
+        len(exc_type_name),
+      )
 
+      if desc:
         for desc_line in desc_lines:
           for wrapped_line in wrap_line(desc_line, width=desc_exp_width):
-            file.write(current_prefix + current_indent + desc_exp_add_indent + wrapped_line + '\n')
+            wrapped_line_prefixed = current_prefix + current_indent + desc_exp_add_indent + wrapped_line
+            yield wrapped_line_prefixed, len(wrapped_line_prefixed)
 
         newline_required = True
-    else:
-      file.write(f'{symbols.color_reset}\n')
 
 
     # Notes
@@ -218,25 +238,36 @@ def render_item(
     note_add_indent = '  ' if not floating else ''
     note_width = current_width - len(note_add_indent)
 
+    note_header_str = 'note'
+    note_prefix = current_prefix + current_indent + note_add_indent
+
     for note in notes:
       note_lines = note.splitlines()
 
       if newline_required:
-        file.write(f'{current_prefix}\n')
+        yield current_prefix, len(current_prefix)
 
-      file.write(f'{current_prefix + current_indent + note_add_indent}{symbols.color_bold}note{symbols.color_reset}')
+      note_header = note_prefix + symbols.color_bold + note_header_str + symbols.color_reset
+      note_header_len = len(note_prefix) + len(note_header_str)
 
       if (len(note_lines) == 1) and (len(note) <= note_width):
-        file.write(f' {note}\n')
+        yield (
+          f'{note_header} {note}',
+          note_header_len + 1 + len(note),
+        )
+
         newline_required = False
       else:
         note_exp_add_indent = '  '
 
-        file.write('\n')
+        yield note_header, note_header_len
 
         for note_line in note_lines:
           for wrapped_line in wrap_line(note_line, width=(note_width - len(note_exp_add_indent))):
-            file.write(current_prefix + current_indent + note_add_indent + note_exp_add_indent + wrapped_line + '\n')
+            yield (
+              note_prefix + note_exp_add_indent + wrapped_line,
+              len(note_prefix) + len(note_exp_add_indent) + len(wrapped_line),
+            )
 
         newline_required = True
 
@@ -248,7 +279,7 @@ def render_item(
 
     if item.frames:
       if newline_required:
-        file.write(f'{current_prefix}\n')
+        yield current_prefix, len(current_prefix)
 
       # Reversing here so we don't have to reverse every atom later on
       if options.inner_frame_on_top:
@@ -267,6 +298,9 @@ def render_item(
           if isinstance(agg_frame, FrameItem) and agg_frame.important and agg_frame.traceable and (len(trace_indices) < options.max_traces):
             trace_indices.add((atom_display_index, agg_frame_index))
 
+      from io import StringIO
+      file = StringIO()
+
       newline_required = render_frames(
         atoms,
         # item.frames,
@@ -277,32 +311,59 @@ def render_item(
         profile=profile,
         symbols=symbols,
         trace_indices=trace_indices,
+        width=(current_width - (2 if not floating else 0)),
       )
+
+      for line in file.getvalue().splitlines():
+        yield line, len(line)
 
 
     # Children
 
     for child_index, child in enumerate(item.children):
       if newline_required:
-        file.write(f'{current_prefix}\n')
+        yield current_prefix, len(current_prefix)
+        newline_required = False
 
       is_child_last = child_index == len(item.children) - 1
-      child_prefix, child_indent = (prefix, indent + '    ') if is_child_last else (prefix + indent + symbols.box_vertical, '   ')
+      child_prefix, child_indent = ('', '    ') if is_child_last else (symbols.box_vertical, '   ')
 
-      file.write(f'{prefix + indent}{symbols.box_up_right if is_child_last else symbols.box_vertical_right}{symbols.box_horizontal * 2} ')
+      child_prefix_first = (symbols.box_up_right if is_child_last else symbols.box_vertical_right) + symbols.box_horizontal * 2
+      child_indent_first = ' '
 
-      newline_required = render_item(
+      for child_line_index, (child_line, child_line_len) in enumerate(render_item(
         child,
-        file,
         options,
         floating=True,
-        indent=child_indent,
-        prefix=child_prefix,
         profile=profile,
         symbols=symbols,
-      )
+        width=(width - len(child_prefix) - len(child_indent)),
+        width_first=(width - len(child_prefix_first) - len(child_indent_first)),
+      )):
+        if newline_required:
+          yield child_prefix, len(child_prefix)
+          newline_required = False
 
-  return newline_required
+        if not child_line:
+          newline_required = True
+          continue
+
+        if child_line_index == 0:
+          yield (
+            child_prefix_first + child_indent_first + child_line,
+            len(child_prefix_first) + len(child_indent_first) + child_line_len,
+          )
+        else:
+          if child_line_len > 0:
+            yield (
+              child_prefix + child_indent + child_line,
+              len(child_prefix) + len(child_indent) + child_line_len,
+            )
+          else:
+            yield child_prefix, len(child_prefix)
+
+  if newline_required:
+    yield '', 0
 
 
 def render_frames(
@@ -314,9 +375,10 @@ def render_frames(
   profile: RenderProfile,
   symbols: Symbols,
   trace_indices: Container[tuple[int, int]],
+  width: int,
 ):
   # Additional options
-  indent = '  '
+  indent_str = '  '
   inset_repeat_box = True
   skip_newline_on_highlights_at_trace_ends = True
 
@@ -335,7 +397,7 @@ def render_frames(
       newline_required = False
 
     if repeat_box:
-      if inset_repeat_box and (prefix[-2:] == indent):
+      if inset_repeat_box and (prefix[-2:] == indent_str):
         repeat_box_prefix = prefix[:-2]
       else:
         repeat_box_prefix = prefix
@@ -462,7 +524,7 @@ def render_frames(
 
             for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
               line_number = context_line_start + rel_line_index
-              trace += f'{frame_prefix}{symbols.color_bright_black}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}{symbols.color_reset}\n'
+              trace += f'{frame_prefix}{symbols.color_bright_black}{indent_str}{line_number: >{line_number_width}} {line[common_indentation:]}{symbols.color_reset}\n'
 
 
             # Display target
@@ -490,8 +552,8 @@ def render_frames(
               anchor_start_sub = max(anchor_start - common_indentation, 0)
               anchor_end_sub = max(anchor_end - common_indentation, 0)
 
-              trace += f'{frame_prefix}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
-              trace += frame_prefix + indent + ' ' * (line_number_width + 1 + anchor_start_sub)
+              trace += f'{frame_prefix}{indent_str}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
+              trace += frame_prefix + indent_str + ' ' * (line_number_width + 1 + anchor_start_sub)
 
               match profile:
                 case 'default':
@@ -505,14 +567,14 @@ def render_frames(
               trace += symbols.color_reset + '\n'
 
             if line_end_cut != line_end:
-              trace += f'{frame_prefix}{indent}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]\n'
+              trace += f'{frame_prefix}{indent_str}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]\n'
 
 
             # Display context after target
 
             for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
               line_number = line_end + rel_line_index + 1
-              trace += f'{frame_prefix}{symbols.color_bright_black}{indent}{line_number: >{line_number_width}} {line[common_indentation:]}{symbols.color_reset}\n'
+              trace += f'{frame_prefix}{symbols.color_bright_black}{indent_str}{line_number: >{line_number_width}} {line[common_indentation:]}{symbols.color_reset}\n'
 
             file.write(trace)
 
