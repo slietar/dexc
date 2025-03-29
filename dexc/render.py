@@ -4,13 +4,15 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pprint import pprint
-from typing import IO, Any, Container, Iterable, Literal, Optional, Sequence
+from typing import (IO, Any, Container, Generator, Iterable, Literal, Optional,
+                    Sequence)
 
 from .compression import Atom
 from .compression.greedy import compress
 from .extract import ExceptionChain, FrameItem, ModuleInfo
 from .options import Options
-from .util import UnreachableError, find_common_ancestors, reversed_if, wrap_line
+from .util import (UnreachableError, find_common_ancestors, reversed_if,
+                   wrap_line)
 from .vendor import get_ipython
 
 
@@ -35,22 +37,28 @@ class Symbols:
   color_underline: str
   color_yellow: str
 
+  box_down_left: str
   box_down_right: str
   box_horizontal: str
+  box_up_left: str
   box_up_right: str
   box_vertical_right: str
   box_vertical: str
 
   def __init__(self, *, ascii_only: bool, colorize: bool):
     if ascii_only:
+      self.box_down_left = '+'
       self.box_down_right = '+'
       self.box_horizontal = '-'
+      self.box_up_left = '+'
       self.box_up_right = '+'
       self.box_vertical = '|'
       self.box_vertical_right = '+'
     else:
+      self.box_down_left = '\u2510'
       self.box_down_right = '\u250c'
       self.box_horizontal = '─'
+      self.box_up_left = '\u2518'
       self.box_up_right = '\u2514'
       self.box_vertical = '\u2502'
       self.box_vertical_right = '\u251c'
@@ -129,12 +137,13 @@ def render(
   options: Options,
   prefix: str = '',
   profile: RenderProfile = 'default',
+  suffix: str = '',
   width: int = 80,
   _symbols: Optional[Symbols] = None,
 ):
   file.write(prefix)
 
-  debug = True
+  debug = False
   symbols = _symbols if _symbols is not None else Symbols.from_file(file, options)
 
   for line_index, (line, line_len) in enumerate(render_item(
@@ -150,10 +159,8 @@ def render(
       file.write(prefix)
 
     file.write(line)
-
-    if debug and (line_len < width):
-      file.write(symbols.color_bright_black + '·' * (width - line_len) + symbols.color_reset)
-
+    file.write(symbols.color_bright_black + ('·' if debug else ' ') * (width - line_len) + symbols.color_reset)
+    file.write(suffix)
     file.write('\n')
 
 
@@ -166,7 +173,7 @@ def render_item(
   symbols: Symbols,
   width: int,
   width_first: int,
-):
+) -> Generator[tuple[str, int]]:
   newline_required = False
 
   for item, relation in (
@@ -280,6 +287,7 @@ def render_item(
     if item.frames:
       if newline_required:
         yield current_prefix, len(current_prefix)
+        newline_required = False
 
       # Reversing here so we don't have to reverse every atom later on
       if options.inner_frame_on_top:
@@ -288,7 +296,7 @@ def render_item(
         frames = reversed(item.frames)
 
       aggregated_frames = aggregate_frames(frames, options)
-      atoms = compress(aggregated_frames, backwards=(not options.compression_first_on_top), key=hash)
+      atoms = compress(aggregated_frames, backwards=(not options.compression_first_on_top))
       # pprint(aggregated_frames)
 
       trace_indices = set[tuple[int, int]]()
@@ -298,24 +306,27 @@ def render_item(
           if isinstance(agg_frame, FrameItem) and agg_frame.important and agg_frame.traceable and (len(trace_indices) < options.max_traces):
             trace_indices.add((atom_display_index, agg_frame_index))
 
-      from io import StringIO
-      file = StringIO()
-
-      newline_required = render_frames(
+      for frame_line, frame_line_len in render_frames(
         atoms,
-        # item.frames,
-        # [],
-        file,
         options,
-        prefix=f'{current_prefix + current_indent}{'  ' if not floating else ''}',
+        indent=(current_indent + ('  ' if not floating else '')),
         profile=profile,
         symbols=symbols,
         trace_indices=trace_indices,
-        width=(current_width - (2 if not floating else 0)),
-      )
+        width=current_width,
+      ):
+        if newline_required:
+          yield current_prefix, len(current_prefix)
+          newline_required = False
 
-      for line in file.getvalue().splitlines():
-        yield line, len(line)
+        if not frame_line:
+          newline_required = True
+          continue
+
+        yield (
+          current_prefix + frame_line,
+          len(current_prefix) + frame_line_len,
+        )
 
 
     # Children
@@ -368,15 +379,14 @@ def render_item(
 
 def render_frames(
   atoms: Sequence[Atom[AggregatedFrame, Any]],
-  file: IO[str],
   options: Options,
   *,
-  prefix: str,
+  indent: str,
   profile: RenderProfile,
   symbols: Symbols,
   trace_indices: Container[tuple[int, int]],
   width: int,
-):
+) -> Generator[tuple[str, int]]:
   # Additional options
   indent_str = '  '
   inset_repeat_box = True
@@ -393,81 +403,112 @@ def render_frames(
       newline_required = True
 
     if newline_required:
-      file.write(prefix + '\n')
+      yield '', 0
       newline_required = False
 
     if repeat_box:
-      if inset_repeat_box and (prefix[-2:] == indent_str):
-        repeat_box_prefix = prefix[:-2]
+      if inset_repeat_box and (indent[-2:] == indent_str):
+        repeat_box_indent = indent[:-2]
       else:
-        repeat_box_prefix = prefix
+        repeat_box_indent = indent
 
-      frame_prefix = repeat_box_prefix + symbols.box_vertical + ' '
-      file.write(f'{repeat_box_prefix}{symbols.box_down_right}{symbols.box_horizontal * 2} Repeated {atom.repeat_count} times {symbols.box_horizontal * 2}\n')
+      repeat_box_header = f'{repeat_box_indent}{symbols.box_down_right}{symbols.box_horizontal * 2} Repeated {atom.repeat_count} times {symbols.box_horizontal * 2}'
+      yield repeat_box_header, len(repeat_box_header)
+
+      frame_prefix = repeat_box_indent + symbols.box_vertical
+      frame_indent = ' '
     else:
-      frame_prefix = prefix
-      repeat_box_prefix = None
+      frame_prefix = ''
+      frame_indent = indent
+      repeat_box_indent = None
 
     for agg_frame_index, agg_frame in enumerate(atom.realization[:len(atom.keys)]):
       if newline_required:
-        file.write(frame_prefix + '\n')
+        yield frame_prefix, len(frame_prefix)
 
-      file.write(frame_prefix)
+      # file.write(frame_indent)
+      frame_title = frame_prefix + frame_indent
+      frame_title_len = len(frame_prefix) + len(frame_indent)
 
       match agg_frame:
         case FrameItem():
           frame = agg_frame
 
-          color = symbols.color_bright_black if not frame.important else ''
-          file.write(color)
+
+          # Frame title
+
+          frame_title_color = symbols.color_bright_black if not frame.important else ''
+          frame_title += frame_title_color
 
           if frame.target is not None:
             target_name = None
+            target_type = None
 
             for node in [frame.target.node, *frame.target.parents[::-1]]:
               match node:
                 case ast.AsyncFunctionDef(name=name) | ast.FunctionDef(name=name):
-                  file.write('at function ')
                   target_name = name
+                  target_type = 'function'
                   break
                 case ast.ClassDef(name=name):
-                  file.write('at class ')
                   target_name = name
+                  target_type = 'class'
                   break
                 case ast.Module():
-                  file.write(f'at module ')
+                  target_type = 'module'
                   break
 
+            assert target_type is not None
+
+            frame_title_target_type_str = f'at {target_type} '
+            frame_title += f'at {target_type} '
+            frame_title_len += len(frame_title_target_type_str)
+
             if target_name is not None:
-              file.write(f'{symbols.color_underline}{target_name}{symbols.color_reset}{color} ')
+              frame_title += symbols.color_underline
+              frame_title += target_name
+              frame_title += symbols.color_reset
+              frame_title += frame_title_color
+              frame_title += ' '
+
+              frame_title_len += len(target_name) + 1
+
+          frame_title_details = ''
 
           if frame.module.name_segments is not None:
-            file.write(f'in {'.'.join(frame.module.name_segments)}')
+            frame_title_details += f'in {'.'.join(frame.module.name_segments)}'
           elif frame.module.label is not None:
-            file.write(f'in {frame.module.label}')
+            frame_title_details += f'in {frame.module.label}'
           else:
-            file.write('in unknown module')
+            frame_title_details += 'in unknown module'
 
           if frame.module.relative_path is not None:
-            file.write(' (')
+            frame_title_details += ' ('
 
             if frame.module.kind == 'user':
-              file.write('./')
+              frame_title_details += './'
 
-            file.write(f'{frame.module.relative_path}')
+            frame_title_details += f'{frame.module.relative_path}'
 
             if frame.area.line_start is not None:
-              file.write(f':{frame.area.line_start}')
+              frame_title_details += f':{frame.area.line_start}'
 
-            file.write(')')
+            frame_title_details += ')'
 
           if frame.reraise:
-            file.write(' [re-raise]')
+            frame_title_details += ' [re-raise]'
 
           if (atom.repeat_count > 1) and (len(atom.keys) == 1):
-            file.write(f' [repeated {atom.repeat_count} times]')
+            frame_title_details += f' [repeated {atom.repeat_count} times]'
 
-          file.write(f'{symbols.color_reset}\n')
+          frame_title += frame_title_details
+          frame_title_len += len(frame_title_details)
+
+          frame_title += symbols.color_reset
+          yield frame_title, frame_title_len
+
+
+          # Frame trace
 
           if (atom_index, agg_frame_index) in trace_indices:
             frame = agg_frame
@@ -520,11 +561,21 @@ def render_frames(
 
             # Display context before target
 
-            trace = ''
+            trace_prefix = frame_prefix + frame_indent + indent_str
 
             for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
               line_number = context_line_start + rel_line_index
-              trace += f'{frame_prefix}{symbols.color_bright_black}{indent_str}{line_number: >{line_number_width}} {line[common_indentation:]}{symbols.color_reset}\n'
+              line_fmt = f'{line_number: >{line_number_width}} ' + line[common_indentation:]
+
+              yield (
+                  trace_prefix
+                + symbols.color_bright_black
+                + line_fmt
+                + symbols.color_reset,
+
+                  len(trace_prefix)
+                + len(line_fmt),
+              )
 
 
             # Display target
@@ -552,31 +603,55 @@ def render_frames(
               anchor_start_sub = max(anchor_start - common_indentation, 0)
               anchor_end_sub = max(anchor_end - common_indentation, 0)
 
-              trace += f'{frame_prefix}{indent_str}{line_number: >{line_number_width}} {line[common_indentation:]}\n'
-              trace += frame_prefix + indent_str + ' ' * (line_number_width + 1 + anchor_start_sub)
+              line_fmt = (
+                  trace_prefix
+                + f'{line_number: >{line_number_width}} '
+                + line[common_indentation:]
+              )
+
+              yield line_fmt, len(line_fmt)
 
               match profile:
                 case 'default':
-                  trace += symbols.color_red
+                  highlight_color = symbols.color_red
                 case 'warning':
-                  trace += symbols.color_orange
+                  highlight_color = symbols.color_orange
                 case _:
                   raise UnreachableError
 
-              trace += '^' * (anchor_end_sub - anchor_start_sub)
-              trace += symbols.color_reset + '\n'
+              yield (
+                  trace_prefix
+                + ' ' * (line_number_width + 1 + anchor_start_sub)
+                + highlight_color
+                + '^' * (anchor_end_sub - anchor_start_sub)
+                + symbols.color_reset,
+
+                  len(trace_prefix)
+                + line_number_width
+                + 1
+                + anchor_end_sub,
+              )
 
             if line_end_cut != line_end:
-              trace += f'{frame_prefix}{indent_str}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]\n'
+              cut_message = f'{frame_indent}{indent_str}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]'
+              yield cut_message, len(cut_message)
 
 
             # Display context after target
 
             for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
               line_number = line_end + rel_line_index + 1
-              trace += f'{frame_prefix}{symbols.color_bright_black}{indent_str}{line_number: >{line_number_width}} {line[common_indentation:]}{symbols.color_reset}\n'
+              line_fmt = f'{line_number: >{line_number_width}} ' + line[common_indentation:]
 
-            file.write(trace)
+              yield (
+                  trace_prefix
+                + symbols.color_bright_black
+                + line_fmt
+                + symbols.color_reset,
+
+                  len(trace_prefix)
+                + len(line_fmt),
+              )
 
             # The line of ^^^^ can be considered a newline
             newline_required = (line_end != context_line_end) or (line_end_cut != line_end) or (not skip_newline_on_highlights_at_trace_ends)
@@ -593,20 +668,39 @@ def render_frames(
           agg_name_segments = find_common_ancestors(module_segments_list)
           module_unique = all(len(name_segments) == len(agg_name_segments) for name_segments in module_segments_list)
 
-          file.write(f'{symbols.color_bright_black}in module{'s' if not module_unique else ''} {'.'.join(agg_name_segments)}{'.*' if not module_unique else ''}')
+          target_fmt = (
+              'in module'
+            + ('s' if not module_unique else '')
+            + ' '
+            + '.'.join(agg_name_segments)
+            + ('.*' if not module_unique else '')
+          )
 
           if len(agg_frames) > 1:
-            file.write(f' [{len(agg_frames)} frames]')
+            target_fmt += f' [{len(agg_frames)} frames]'
 
-          file.write(f'{symbols.color_reset}\n')
+          yield (
+              frame_prefix
+            + frame_indent
+            + symbols.color_bright_black
+            + target_fmt
+            + symbols.color_reset,
+
+              len(frame_prefix)
+            + len(frame_indent)
+            + len(target_fmt),
+          )
 
           newline_required = False
 
         case _:
           raise UnreachableError
 
-    if repeat_box_prefix is not None:
-      file.write(f'{repeat_box_prefix}{symbols.box_up_right}{symbols.box_horizontal * 3}\n')
+    if repeat_box_indent is not None:
+      repeat_box_header = repeat_box_indent + symbols.box_up_right + (symbols.box_horizontal * 3)
+      yield repeat_box_header, len(repeat_box_header)
+
       newline_required = True
 
-  return newline_required
+  if newline_required:
+    yield '', 0
