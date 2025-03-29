@@ -10,7 +10,7 @@ from .compression import Atom
 from .compression.greedy import compress
 from .extract import ExceptionChain, FrameItem, ModuleInfo
 from .options import Options
-from .util import UnreachableError, find_common_ancestors, reversed_if, split_paragraph
+from .util import UnreachableError, find_common_ancestors, reversed_if, wrap_line
 from .vendor import get_ipython
 
 
@@ -26,6 +26,7 @@ def get_common_indentation(lines: list[str], /):
 
 @dataclass(slots=True)
 class Symbols:
+  color_bold: str
   color_bright_black: str
   color_italic: str
   color_orange: str
@@ -55,6 +56,7 @@ class Symbols:
       self.box_vertical_right = '\u251c'
 
     if colorize:
+      self.color_bold = '\033[1m'
       self.color_bright_black = '\033[90m'
       self.color_italic = '\033[3m'
       self.color_orange = '\033[38;5;208m'
@@ -63,6 +65,7 @@ class Symbols:
       self.color_underline = '\033[4m'
       self.color_yellow = '\033[33m'
     else:
+      self.color_bold = ''
       self.color_bright_black = ''
       self.color_italic = ''
       self.color_orange = ''
@@ -185,31 +188,35 @@ def render_item(
     current_width = (width - 1) if item.children else width
 
     desc = str(item.instance)
-    desc_indent = '  ' if not item.children else ''
     desc_lines = desc.splitlines()
-    desc_width = current_width - len(desc_indent)
 
     exc_type_name = type(item.instance).__name__
-    file.write(exc_type_name)
+    exc_type_sep = ': '
+    file.write(symbols.color_bold + exc_type_name)
 
     if desc:
-      if (len(desc_lines) == 1) and (len(desc) <= current_width - len(exc_type_name) - len(': ')):
-        file.write(f': {desc}\n')
+      if (len(desc_lines) == 1) and (len(desc) <= current_width - len(exc_type_name) - len(exc_type_sep)):
+        file.write(f'{exc_type_sep}{symbols.color_reset}{desc}\n')
       else:
-        file.write('\n')
+        desc_exp_add_indent = '  ' if not item.children else ''
+        desc_exp_width = current_width - len(desc_exp_add_indent)
 
-        for desc_line in split_paragraph(desc_lines, width=desc_width):
-          file.write(current_prefix + current_indent + desc_indent + desc_line + '\n')
+        file.write(f'{symbols.color_reset}\n')
+
+        for desc_line in desc_lines:
+          for wrapped_line in wrap_line(desc_line, width=desc_exp_width):
+            file.write(current_prefix + current_indent + desc_exp_add_indent + wrapped_line + '\n')
 
         newline_required = True
     else:
-      file.write('\n')
+      file.write(f'{symbols.color_reset}\n')
 
 
     # Notes
 
     notes = getattr(item.instance, '__notes__', [])
-    note_indent = '  ' if not floating else ''
+    note_add_indent = '  ' if not floating else ''
+    note_width = current_width - len(note_add_indent)
 
     for note in notes:
       note_lines = note.splitlines()
@@ -217,18 +224,21 @@ def render_item(
       if newline_required:
         file.write(f'{current_prefix}\n')
 
-      file.write(f'{current_prefix + current_indent + note_indent}{symbols.color_underline}note{symbols.color_reset}')
+      file.write(f'{current_prefix + current_indent + note_add_indent}{symbols.color_bold}note{symbols.color_reset}')
 
-      if len(note_lines) > 1:
+      if (len(note_lines) == 1) and (len(note) <= note_width):
+        file.write(f' {note}\n')
+        newline_required = False
+      else:
+        note_exp_add_indent = '  '
+
         file.write('\n')
 
         for note_line in note_lines:
-          file.write(current_prefix + current_indent + note_indent + '  ' + note_line + '\n')
+          for wrapped_line in wrap_line(note_line, width=(note_width - len(note_exp_add_indent))):
+            file.write(current_prefix + current_indent + note_add_indent + note_exp_add_indent + wrapped_line + '\n')
 
         newline_required = True
-      else:
-        file.write(f' {note}\n')
-        newline_required = False
 
     if notes:
       newline_required = True
