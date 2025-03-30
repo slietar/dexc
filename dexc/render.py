@@ -104,9 +104,6 @@ class LibraryFrameAggregate:
   package_name: str
   frames: list[FrameItem] = field(default_factory=list)
 
-  def __hash__(self):
-    return id(self)
-
 type AggregatedFrame = FrameItem | LibraryFrameAggregate
 
 def aggregate_frames(frames: Iterable[FrameItem], options: Options):

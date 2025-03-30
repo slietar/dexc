@@ -25,6 +25,7 @@ class FrameArea:
 @dataclass(eq=True, frozen=True, slots=True)
 class FrameItem:
   area: FrameArea
+  hidden: bool
   module: ModuleInfo
   target: Optional[AstTarget]
   reraise: bool
@@ -104,6 +105,7 @@ def extract_exc_frames(exc: BaseException, /):
           (exc.end_offset - 1) if exc.end_offset > 0 else exc.offset
         ) if exc.end_offset is not None else None,
       ),
+      hidden=False,
       module=module_info,
       reraise=False,
       target=None,
@@ -153,8 +155,15 @@ def extract_tb_frames(start_tb: TracebackType, /):
     else:
       target = None
 
+    hidden = (
+      bool(local_hidden)
+      if (local_hidden := frame.f_locals.get('__tracebackhide__')) is not None
+      else bool(frame.f_globals.get('__tracebackhide__'))
+    )
+
     frame = FrameItem(
       area=area,
+      hidden=hidden,
       module=module_info,
       target=target,
       reraise=((tb_index > 0) and (target is not None) and isinstance(target.node, ast.Raise)),
