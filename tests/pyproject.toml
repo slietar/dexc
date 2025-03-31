@@ -5,6 +5,7 @@ requires-python = "~=3.13"
 dependencies = [
     "dexc",
     "ipykernel==6.29.5",
+    "jax>=0.5.3",
     "numpy==2.2.4",
     "scipy==1.15.2",
 ]

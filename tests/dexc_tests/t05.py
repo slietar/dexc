@@ -41,7 +41,7 @@ def main():
       return e
 
 
-  raise ExceptionGroup('Group', [
+  g = ExceptionGroup('Group', [
     produce_exc('A'),
     produce_exc('B'),
     Exception('C'),
@@ -53,3 +53,7 @@ def main():
     Exception('D'),
     e(),
   ])
+
+  g.add_note('note 3')
+
+  raise g

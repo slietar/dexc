@@ -25,5 +25,5 @@ else:
     if '_' in file_path.stem:
       continue
 
-    print(f'-- {file_path.stem} {'-' * 80}', file=sys.stderr)
+    print(f'-- {file_path.stem} {'-' * 73}', file=sys.stderr)
     run_test(f'dexc_tests.{file_path.stem}')

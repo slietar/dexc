@@ -1,3 +1,5 @@
+from .t26_a.foo.bar.baz.foo.bar.baz import call
+
 def main():
   def long_long_long_long_long_long_long_long_long_long_long_function():
     e = Exception('This is a long long long long long long long long long long long long long long long long long exception')
@@ -10,4 +12,4 @@ def main():
 
     raise e
 
-  long_long_long_long_long_long_long_long_long_long_long_function()
+  call(long_long_long_long_long_long_long_long_long_long_long_function)

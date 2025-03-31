@@ -1,0 +1,2 @@
+def call(f):
+  f()
