@@ -8,6 +8,112 @@ class UnreachableError(Exception):
   pass
 
 
+def condense_path(parts: Sequence[str], /, *, ellipsis: str, priority_left: bool = False, width: int):
+  left_index, right_index = condense_seq(
+    [len(part) for part in parts],
+    ellipsis_width=len(ellipsis),
+    priority_left=priority_left,
+    separator_width=1,
+    width=width,
+  )
+
+  return format_condensed_seq(
+    parts,
+    (left_index, right_index),
+    ellipsis=ellipsis,
+    separator='/',
+  )
+
+
+def condense_seq(
+  item_widths: Sequence[int],
+  /, *,
+  ellipsis_width: int,
+  priority_left: bool = False,
+  separator_width: int = 1,
+  width: int,
+):
+  assert width >= ellipsis_width
+
+  left_index = 0
+  right_index = len(item_widths)
+
+  left_width = 0
+  right_width = 0
+
+  # instric_width = sum(item_widths) + sep_width * (len(item_widths) - 1)
+  # print(f'{instric_width=}')
+
+  # if instric_width <= width:
+  #   return 0, 0
+
+  while left_index != right_index:
+    left_sep_width = separator_width if left_index > 0 else 0
+    right_sep_width = separator_width if right_index < len(item_widths) else 0
+
+    new_left_width = left_width + left_sep_width + item_widths[left_index]
+    new_right_width = right_width + right_sep_width + item_widths[right_index - 1]
+
+    joining = right_index - left_index == 1
+
+    left_grow = new_left_width + (separator_width + ellipsis_width if not joining else 0) + right_sep_width + right_width <= width
+    right_grow = left_width + left_sep_width + (ellipsis_width + separator_width if not joining else 0) + new_right_width <= width
+
+    if left_grow and (
+      ((left_width <= right_width) and priority_left) or
+      (not right_grow)
+    ):
+      left_index += 1
+      left_width = new_left_width
+    elif right_grow:
+      right_index -= 1
+      right_width = new_right_width
+    else:
+      break
+
+    # print('!', new_left_width + join_width + right_width, width)
+    # print(new_left_width, join_width, right_width, width)
+    # if (left_width < right_width) and ():
+    #   left_index += 1
+    #   left_width = new_left_width
+    #   continue
+
+    # if left_width + left_sep_width + (ellipsis_width + sep_width if not joining else 0) + new_right_width <= width:
+    #   right_index -= 1
+    #   right_width = new_right_width
+    #   continue
+
+    # if new_left_width + (sep_width + ellipsis_width if not joining else 0) + right_sep_width + right_width <= width:
+    #   left_index += 1
+    #   left_width = new_left_width
+    #   continue
+
+    # break
+
+  return left_index, right_index
+
+
+def format_condensed_seq(items: Sequence[str], indices: tuple[int, int], *, ellipsis: str, separator: str):
+  left_index, right_index = indices
+  output = separator.join(items[:left_index])
+
+  if (left_index > 0) and (
+    (right_index < len(items)) or
+    (left_index != right_index)
+  ):
+    output += separator
+
+  if left_index != right_index:
+    output += ellipsis
+
+    if right_index < len(items):
+      output += separator
+
+  output += separator.join(items[right_index:])
+
+  return output
+
+
 def create_tb(start_depth: int = 0):
   tb: Optional[TracebackType] = None
   depth = start_depth + 2
@@ -103,10 +209,10 @@ def wrap_line(line: str, /, *, maintain_indent: bool = True, max_indent: int = 2
   yield line[:line_indent] + line[current_index:]
 
 
-# if __name__ == '__main__':
-#   split = list(wrap_line('  Lorem ipsum dolor sit amet, consectetur adipisci elit.', maintain_indent=True, width=12))
+def wrap_with_ellipsis(target: str, /, *, ellipsis: str, width: int):
+  assert len(ellipsis) <= width
 
-#   print(split)
+  if len(target) <= width:
+    return target
 
-#   for line in split:
-#     print(line)
+  return target[:(width - len(ellipsis))] + ellipsis

@@ -11,8 +11,8 @@ from .compression import Atom
 from .compression.greedy import compress
 from .extract import ExceptionChain, FrameItem, ModuleInfo
 from .options import Options
-from .util import (UnreachableError, find_common_ancestors, reversed_if,
-                   wrap_line)
+from .util import (UnreachableError, condense_path, find_common_ancestors,
+                   reversed_if, wrap_line, wrap_with_ellipsis)
 from .vendor import get_ipython
 
 
@@ -45,6 +45,8 @@ class Symbols:
   box_vertical_right: str
   box_vertical: str
 
+  ellipsis: str
+
   def __init__(self, *, ascii_only: bool, colorize: bool):
     if ascii_only:
       self.box_down_left = '+'
@@ -54,6 +56,7 @@ class Symbols:
       self.box_up_right = '+'
       self.box_vertical = '|'
       self.box_vertical_right = '+'
+      self.ellipsis = '...'
     else:
       self.box_down_left = '\u2510'
       self.box_down_right = '\u250c'
@@ -62,6 +65,7 @@ class Symbols:
       self.box_up_right = '\u2514'
       self.box_vertical = '\u2502'
       self.box_vertical_right = '\u251c'
+      self.ellipsis = '\u2026'
 
     if colorize:
       self.color_bold = '\033[1m'
@@ -135,7 +139,7 @@ def render(
   prefix: str = '',
   profile: RenderProfile = 'default',
   suffix: str = '',
-  width: int = 80,
+  width: int = 80, # Excluding prefix and suffix
   _symbols: Optional[Symbols] = None,
 ):
   file.write(prefix)
@@ -149,8 +153,9 @@ def render(
     floating=False,
     profile=profile,
     symbols=symbols,
-    width=(width - len(prefix)),
-    width_first=(width - len(prefix)),
+    width=width,
+    width_first=width,
+    width_full=width,
   )):
     if line_index > 0:
       file.write(prefix)
@@ -170,6 +175,7 @@ def render_item(
   symbols: Symbols,
   width: int,
   width_first: int,
+  width_full: int,
 ) -> Generator[tuple[str, int]]:
   newline_required = False
 
@@ -311,6 +317,7 @@ def render_item(
         symbols=symbols,
         trace_indices=trace_indices,
         width=current_width,
+        width_full=width_full,
       ):
         if newline_required:
           yield current_prefix, len(current_prefix)
@@ -347,6 +354,7 @@ def render_item(
         symbols=symbols,
         width=(width - len(child_prefix) - len(child_indent)),
         width_first=(width - len(child_prefix_first) - len(child_indent_first)),
+        width_full=width_full,
       )):
         if newline_required:
           yield child_prefix, len(child_prefix)
@@ -382,12 +390,15 @@ def render_frames(
   profile: RenderProfile,
   symbols: Symbols,
   trace_indices: Container[tuple[int, int]],
-  width: int,
+  width: int, # Excluding indent
+  width_full: int,
 ) -> Generator[tuple[str, int]]:
   # Additional options
   indent_str = '  '
   inset_repeat_box = True
   skip_newline_on_highlights_at_trace_ends = True
+
+  half_width = width // 2 - 2
 
   # Whether a newline is required before the next frame
   newline_required = False
@@ -405,8 +416,10 @@ def render_frames(
 
     if repeat_box:
       if inset_repeat_box and (indent[-2:] == indent_str):
+        half_width_left = half_width
         repeat_box_indent = indent[:-2]
       else:
+        half_width_left = half_width - 2
         repeat_box_indent = indent
 
       repeat_box_header = f'{repeat_box_indent}{symbols.box_down_right}{symbols.box_horizontal * 2} Repeated {atom.repeat_count} times {symbols.box_horizontal * 2}'
@@ -417,15 +430,12 @@ def render_frames(
     else:
       frame_prefix = ''
       frame_indent = indent
+      half_width_left = half_width
       repeat_box_indent = None
 
     for agg_frame_index, agg_frame in enumerate(atom.realization[:len(atom.keys)]):
       if newline_required:
         yield frame_prefix, len(frame_prefix)
-
-      # file.write(frame_indent)
-      frame_title = frame_prefix + frame_indent
-      frame_title_len = len(frame_prefix) + len(frame_indent)
 
       match agg_frame:
         case FrameItem():
@@ -434,8 +444,11 @@ def render_frames(
 
           # Frame title
 
+          frame_title_left = frame_prefix + frame_indent
+          frame_title_left_len = len(frame_prefix) + len(frame_indent)
+
           frame_title_color = symbols.color_bright_black if not frame.important else ''
-          frame_title += frame_title_color
+          frame_title_left += frame_title_color
 
           if frame.target is not None:
             target_name = None
@@ -457,52 +470,77 @@ def render_frames(
 
             assert target_type is not None
 
-            frame_title_target_type_str = f'at {target_type} '
-            frame_title += f'at {target_type} '
-            frame_title_len += len(frame_title_target_type_str)
+            frame_title_target_type_str = f'at {target_type}'
+            frame_title_left += f'at {target_type}'
+            frame_title_left_len += len(frame_title_target_type_str)
 
             if target_name is not None:
-              frame_title += symbols.color_underline
-              frame_title += target_name
-              frame_title += symbols.color_reset
-              frame_title += frame_title_color
-              frame_title += ' '
+              frame_title_left += ' '
+              frame_title_left_len += 1
 
-              frame_title_len += len(target_name) + 1
+              frame_title_left += symbols.color_underline
 
-          frame_title_details = ''
+              target_name_wrapped = wrap_with_ellipsis(target_name, ellipsis=symbols.ellipsis, width=(half_width_left - frame_title_left_len))
 
-          if frame.module.name_segments is not None:
-            frame_title_details += f'in {'.'.join(frame.module.name_segments)}'
-          elif frame.module.label is not None:
-            frame_title_details += f'in {frame.module.label}'
+              frame_title_left += target_name_wrapped
+              frame_title_left += symbols.color_reset
+              frame_title_left += frame_title_color
+
+              frame_title_left_len += len(target_name_wrapped)
           else:
-            frame_title_details += 'in unknown module'
+            frame_title_left += 'at '
+            frame_title_left_len += 3
+
+            if frame.module.label is not None:
+              target_name_wrapped = wrap_with_ellipsis(frame.module.label, ellipsis=symbols.ellipsis, width=(half_width_left - frame_title_left_len))
+            else:
+              target_name_wrapped = ' unknown module'
+
+            frame_title_left += target_name_wrapped
+            frame_title_left_len += len(target_name_wrapped)
+
+
+          # if frame.module.name_segments is not None:
+          #   frame_title_details += f'in {'.'.join(frame.module.name_segments)}'
+          # elif frame.module.label is not None:
+          #   frame_title_details += f'in {frame.module.label}'
+          # else:
+          #   frame_title_details += 'in unknown module'
 
           if frame.module.relative_path is not None:
-            frame_title_details += ' ('
+            # frame_title_path += ' ('
+
+            path_parts = list[str]()
 
             if frame.module.kind == 'user':
-              frame_title_details += './'
+              path_parts.append('.')
 
-            frame_title_details += f'{frame.module.relative_path}'
+            path_parts += frame.module.relative_path.parts
 
             if frame.area.line_start is not None:
-              frame_title_details += f':{frame.area.line_start}'
+              line_start_fmt = f':{frame.area.line_start}'
+            else:
+              line_start_fmt = ''
 
-            frame_title_details += ')'
+            condensed_path = condense_path(path_parts, ellipsis=symbols.ellipsis, width=(half_width - len(line_start_fmt)))
+            frame_title_right = condensed_path + line_start_fmt
+          else:
+            frame_title_right = ''
 
-          if frame.reraise:
-            frame_title_details += ' [re-raise]'
+          # if frame.reraise:
+          #   frame_title_right += ' [re-raise]'
 
-          if (atom.repeat_count > 1) and (len(atom.keys) == 1):
-            frame_title_details += f' [repeated {atom.repeat_count} times]'
+          # if (atom.repeat_count > 1) and (len(atom.keys) == 1):
+          #   frame_title_right += f' [repeated {atom.repeat_count} times]'
 
-          frame_title += frame_title_details
-          frame_title_len += len(frame_title_details)
+          frame_title_right_len = len(frame_title_right)
 
-          frame_title += symbols.color_reset
-          yield frame_title, frame_title_len
+          frame_title = frame_title_left
+
+          if frame_title_right:
+            frame_title += ' ' * (width - frame_title_left_len - frame_title_right_len) + frame_title_right
+
+          yield frame_title, width
 
 
           # Frame trace
