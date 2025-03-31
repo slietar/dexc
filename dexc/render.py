@@ -4,8 +4,8 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pprint import pprint
-from typing import (IO, Any, Container, Generator, Iterable, Literal, Optional,
-                    Sequence)
+from typing import (IO, Any, Callable, Container, Generator, Iterable, Literal,
+                    Optional, Sequence)
 
 from .compression import Atom
 from .compression.greedy import compress
@@ -46,6 +46,7 @@ class Symbols:
   box_vertical: str
 
   ellipsis: str
+  link: Callable[[str, str], str]
 
   def __init__(self, *, ascii_only: bool, colorize: bool):
     if ascii_only:
@@ -56,6 +57,7 @@ class Symbols:
       self.box_up_right = '+'
       self.box_vertical = '|'
       self.box_vertical_right = '+'
+
       self.ellipsis = '...'
     else:
       self.box_down_left = '\u2510'
@@ -65,6 +67,7 @@ class Symbols:
       self.box_up_right = '\u2514'
       self.box_vertical = '\u2502'
       self.box_vertical_right = '\u251c'
+
       self.ellipsis = '\u2026'
 
     if colorize:
@@ -76,6 +79,8 @@ class Symbols:
       self.color_reset = '\033[0m'
       self.color_underline = '\033[4m'
       self.color_yellow = '\033[33m'
+
+      self.link = lambda text, url: f'\033]8;;{url}\033\\{text}\033]8;;\033\\'
     else:
       self.color_bold = ''
       self.color_bright_black = ''
@@ -85,6 +90,8 @@ class Symbols:
       self.color_reset = ''
       self.color_underline = ''
       self.color_yellow = ''
+
+      self.link = lambda text, url: text
 
   @classmethod
   def from_file(cls, file: IO[str], options: Options):
@@ -155,7 +162,6 @@ def render(
     symbols=symbols,
     width=width,
     width_first=width,
-    width_full=width,
   )):
     if line_index > 0:
       file.write(prefix)
@@ -175,7 +181,6 @@ def render_item(
   symbols: Symbols,
   width: int,
   width_first: int,
-  width_full: int,
 ) -> Generator[tuple[str, int]]:
   newline_required = False
 
@@ -309,15 +314,16 @@ def render_item(
           if isinstance(agg_frame, FrameItem) and agg_frame.important and agg_frame.traceable and (len(trace_indices) < options.max_traces):
             trace_indices.add((atom_display_index, agg_frame_index))
 
+      frame_indent = current_indent + ('  ' if not floating else '')
+
       for frame_line, frame_line_len in render_frames(
         atoms,
         options,
-        indent=(current_indent + ('  ' if not floating else '')),
+        indent=frame_indent,
         profile=profile,
         symbols=symbols,
         trace_indices=trace_indices,
-        width=current_width,
-        width_full=width_full,
+        width=(current_width - len(frame_indent)),
       ):
         if newline_required:
           yield current_prefix, len(current_prefix)
@@ -354,7 +360,6 @@ def render_item(
         symbols=symbols,
         width=(width - len(child_prefix) - len(child_indent)),
         width_first=(width - len(child_prefix_first) - len(child_indent_first)),
-        width_full=width_full,
       )):
         if newline_required:
           yield child_prefix, len(child_prefix)
@@ -391,14 +396,15 @@ def render_frames(
   symbols: Symbols,
   trace_indices: Container[tuple[int, int]],
   width: int, # Excluding indent
-  width_full: int,
 ) -> Generator[tuple[str, int]]:
   # Additional options
   indent_str = '  '
   inset_repeat_box = True
   skip_newline_on_highlights_at_trace_ends = True
 
-  half_width = width // 2 - 2
+  full_width = width + len(indent)
+  half_width = (width - 4) // 2
+  half_width_left = half_width + len(indent_str)
 
   # Whether a newline is required before the next frame
   newline_required = False
@@ -416,10 +422,8 @@ def render_frames(
 
     if repeat_box:
       if inset_repeat_box and (indent[-2:] == indent_str):
-        half_width_left = half_width
         repeat_box_indent = indent[:-2]
       else:
-        half_width_left = half_width - 2
         repeat_box_indent = indent
 
       repeat_box_header = f'{repeat_box_indent}{symbols.box_down_right}{symbols.box_horizontal * 2} Repeated {atom.repeat_count} times {symbols.box_horizontal * 2}'
@@ -430,7 +434,6 @@ def render_frames(
     else:
       frame_prefix = ''
       frame_indent = indent
-      half_width_left = half_width
       repeat_box_indent = None
 
     for agg_frame_index, agg_frame in enumerate(atom.realization[:len(atom.keys)]):
@@ -481,6 +484,7 @@ def render_frames(
               frame_title_left += symbols.color_underline
 
               target_name_wrapped = wrap_with_ellipsis(target_name, ellipsis=symbols.ellipsis, width=(half_width_left - frame_title_left_len))
+              # target_name_wrapped = 'y' * (half_width_left - frame_title_left_len)
 
               frame_title_left += target_name_wrapped
               frame_title_left += symbols.color_reset
@@ -508,7 +512,7 @@ def render_frames(
           #   frame_title_details += 'in unknown module'
 
           if frame.module.relative_path is not None:
-            # frame_title_path += ' ('
+            assert frame.module.path is not None
 
             path_parts = list[str]()
 
@@ -523,9 +527,13 @@ def render_frames(
               line_start_fmt = ''
 
             condensed_path = condense_path(path_parts, ellipsis=symbols.ellipsis, width=(half_width - len(line_start_fmt)))
-            frame_title_right = condensed_path + line_start_fmt
+            # condensed_path = (half_width - len(line_start_fmt)) * 'x'
+            frame_title_right = symbols.link(condensed_path, frame.module.path.as_uri()) if options.target_links else condensed_path
+            frame_title_right += line_start_fmt
+            frame_title_right_len = len(condensed_path) + len(line_start_fmt)
           else:
             frame_title_right = ''
+            frame_title_right_len = 0
 
           # if frame.reraise:
           #   frame_title_right += ' [re-raise]'
@@ -533,14 +541,23 @@ def render_frames(
           # if (atom.repeat_count > 1) and (len(atom.keys) == 1):
           #   frame_title_right += f' [repeated {atom.repeat_count} times]'
 
-          frame_title_right_len = len(frame_title_right)
-
           frame_title = frame_title_left
 
           if frame_title_right:
-            frame_title += ' ' * (width - frame_title_left_len - frame_title_right_len) + frame_title_right
+            frame_title += ' ' * (full_width - frame_title_left_len - frame_title_right_len) + frame_title_right
 
-          yield frame_title, width
+          yield frame_title, full_width
+
+          # if frame.reraise:
+          #   reraise_message = f'{frame_indent}{indent_str}Reraised'
+          #   yield symbols.color_orange + reraise_message + symbols.color_reset, len(reraise_message)
+
+          if (atom.repeat_count > 1) and (len(atom.keys) == 1):
+            # message = f' [repeated {atom.repeat_count} times]'
+            # yield ' ' * (width - len(message)) + message, width
+            yield f'  [repeated {atom.repeat_count} times]', 0
+
+            # yield f' [repeated {atom.repeat_count} times]', 1
 
 
           # Frame trace
