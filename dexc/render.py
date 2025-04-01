@@ -3,8 +3,8 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pprint import pprint
-from typing import (IO, Any, Callable, Container, Generator, Iterable, Literal,
-                    Optional, Sequence)
+from typing import (IO, Any, Container, Generator, Iterable, Literal, Optional,
+                    Sequence)
 
 from . import util
 from .compression import Atom
@@ -13,7 +13,7 @@ from .extract import (ExceptionChain, FrameAreaFull, FrameAreaLines,
                       FrameAreaStartLine, FrameAreaStartLineCol, FrameItem,
                       ModuleInfo)
 from .options import Options
-from .util import UnreachableError
+from .util import UnreachableError, wrap_into_ellipsis
 from .vendor import get_ipython
 
 
@@ -23,6 +23,19 @@ def get_integer_width(x: int, /):
 def get_common_indentation(lines: list[str], /):
   return min(len(line) - len(stripped_line) for line in lines if (stripped_line := line.lstrip()))
 
+
+# Line number starts at 1
+# Column number starts at 0
+def ansi_link(text: str, url: str, *, column_number: Optional[int] = None, line_number: Optional[int] = None):
+  assert (column_number is None) or (line_number is not None)
+
+  full_url = (
+      url
+    + (f'#{line_number}' if line_number is not None else '')
+    + (f':{column_number + 1}' if column_number is not None else '')
+  )
+
+  return f'\033]8;;{full_url}\033\\{text}\033]8;;\033\\'
 
 @dataclass(slots=True)
 class Symbols:
@@ -46,7 +59,7 @@ class Symbols:
 
   chevron_right: str
   ellipsis: str
-  link: Callable[[str, str], str]
+  link_enabled: bool
 
   def __init__(self, *, ascii_only: bool, colorize: bool):
     if ascii_only:
@@ -83,7 +96,7 @@ class Symbols:
       self.underline = '\033[4m'
       self.underline_reset = '\033[24m'
 
-      self.link = lambda text, url: f'\033]8;;{url}\033\\{text}\033]8;;\033\\'
+      self.link_enabled = True
     else:
       self.color_bold = ''
       self.color_bright_black = ''
@@ -95,7 +108,7 @@ class Symbols:
       self.underline = ''
       self.underline_reset = ''
 
-      self.link = lambda text, url: text
+      self.link_enabled = True
 
   @classmethod
   def from_file(cls, file: IO[str], options: Options):
@@ -400,17 +413,13 @@ def render_frames(
   symbols: Symbols,
   trace_indices: Container[tuple[int, int]],
   width: int, # Excluding indent
-) -> Generator[tuple[str, int]]:
+) -> Generator[tuple[str, int]]: # Both including indent
   # Additional options
   indent_str = '  '
   inset_repeat_box = True
   skip_newline_on_highlights_at_trace_ends = True
 
-  # full_width = width + len(indent)
-  # half_width = (width - 4) // 2
-  # half_width_left = half_width + len(indent_str)
   most_width = max(width - 20, width * 7 // 10)
-  # most_width = width
 
   # Whether a newline is required before the next frame
   newline_required = False
@@ -554,7 +563,12 @@ def render_frames(
 
             condensed_path, condensed_path_len = util.condense_parts(path_parts, ellipsis=symbols.ellipsis, separator='/', width=(most_available_width - frame_title_right_len))
 
-            frame_title_right = symbols.link(condensed_path, frame.module.path.as_uri()) if options.target_links else condensed_path
+            frame_title_right = ansi_link(
+              condensed_path,
+              frame.module.path.as_uri(),
+              column_number=(frame.area.col_start if frame.area is not None else None),
+              line_number=(frame.area.line_start if frame.area is not None else None),
+            ) if symbols.link_enabled and options.target_links else condensed_path
             frame_title_right_len += condensed_path_len
           elif frame.module.label is not None:
             string = util.wrap_into_ellipsis(frame.module.label, ellipsis=symbols.ellipsis, width=(most_available_width - frame_title_right_len))
@@ -572,19 +586,43 @@ def render_frames(
 
           if frame_title_left_len + frame_title_right_len < available_width - 8:
             yield (
-              frame_prefix + frame_indent + frame_title_color + frame_title_left + ' ' * (available_width - frame_title_left_len - frame_title_right_len) + frame_title_right + symbols.color_reset,
-              len(frame_prefix) + len(frame_indent) + available_width,
+                frame_prefix
+              + frame_indent
+              + frame_title_color
+              + frame_title_left
+              + ' ' * (available_width - frame_title_left_len - frame_title_right_len)
+              + frame_title_right
+              + symbols.color_reset,
+
+                len(frame_prefix)
+              + len(frame_indent)
+              + available_width,
             )
 
           else:
             yield (
-              frame_prefix + frame_indent + frame_title_color + frame_title_left + symbols.color_reset,
-              len(frame_prefix) + len(frame_indent) + frame_title_left_len,
+                frame_prefix
+              + frame_indent
+              + frame_title_color
+              + frame_title_left
+              + symbols.color_reset,
+
+                len(frame_prefix)
+              + len(frame_indent)
+              + frame_title_left_len,
             )
 
             yield (
-              frame_prefix + frame_indent + ' ' * (available_width - frame_title_right_len) + frame_title_color + frame_title_right + symbols.color_reset,
-              available_width,
+                frame_prefix
+              + frame_indent
+              + ' ' * (available_width - frame_title_right_len)
+              + frame_title_color
+              + frame_title_right
+              + symbols.color_reset,
+
+                len(frame_prefix)
+              + len(frame_indent)
+              + available_width,
             )
 
 
@@ -762,27 +800,40 @@ def render_frames(
           agg_name_segments = util.find_common_ancestors(module_segments_list)
           module_unique = all(len(name_segments) == len(agg_name_segments) for name_segments in module_segments_list)
 
-          target_fmt = (
-              'in module'
-            + ('s' if not module_unique else '')
-            + ' '
-            + '.'.join(agg_name_segments)
-            + ('.*' if not module_unique else '')
+          if len(agg_frames) > 1:
+            frame_title_suffix = f' [{len(agg_frames)} frames]'
+          else:
+            frame_title_suffix = ''
+
+          frame_title_len = len(frame_title_suffix)
+
+          string = 'in module' + ('s' if not module_unique else '') + ' '
+          frame_title = string
+          frame_title_len += len(string)
+
+          string = wrap_into_ellipsis(
+            '.'.join(agg_name_segments) + ('.*' if not module_unique else ''),
+            ellipsis=symbols.ellipsis,
+            width=(most_available_width - frame_title_len),
           )
 
-          if len(agg_frames) > 1:
-            target_fmt += f' [{len(agg_frames)} frames]'
+          if string.endswith('.'):
+            string = string[:-1]
+
+          frame_title += string
+          frame_title += frame_title_suffix
+          frame_title_len += len(string)
 
           yield (
               frame_prefix
             + frame_indent
             + symbols.color_bright_black
-            + target_fmt
+            + frame_title
             + symbols.color_reset,
 
               len(frame_prefix)
             + len(frame_indent)
-            + len(target_fmt),
+            + frame_title_len,
           )
 
           newline_required = False
