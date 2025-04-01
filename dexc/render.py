@@ -11,8 +11,8 @@ from .compression import Atom
 from .compression.greedy import compress
 from .extract import ExceptionChain, FrameItem, ModuleInfo
 from .options import Options
-from .util import (UnreachableError, condense_path, find_common_ancestors,
-                   reversed_if, wrap_line, wrap_with_ellipsis)
+from .util import (UnreachableError, condense_parts, condense_seq, find_common_ancestors, format_condensed_seq,
+                   reversed_if, wrap_into_paragraph, wrap_into_ellipsis)
 from .vendor import get_ipython
 
 
@@ -34,8 +34,9 @@ class Symbols:
   color_orange: str
   color_red: str
   color_reset: str
-  color_underline: str
   color_yellow: str
+  underline: str
+  underline_reset: str
 
   box_down_left: str
   box_down_right: str
@@ -45,6 +46,7 @@ class Symbols:
   box_vertical_right: str
   box_vertical: str
 
+  chevron_right: str
   ellipsis: str
   link: Callable[[str, str], str]
 
@@ -58,6 +60,7 @@ class Symbols:
       self.box_vertical = '|'
       self.box_vertical_right = '+'
 
+      self.chevron_right = '>'
       self.ellipsis = '...'
     else:
       self.box_down_left = '\u2510'
@@ -68,6 +71,7 @@ class Symbols:
       self.box_vertical = '\u2502'
       self.box_vertical_right = '\u251c'
 
+      self.chevron_right = '\u203a'
       self.ellipsis = '\u2026'
 
     if colorize:
@@ -77,8 +81,9 @@ class Symbols:
       self.color_orange = '\033[38;5;208m'
       self.color_red = '\033[31m'
       self.color_reset = '\033[0m'
-      self.color_underline = '\033[4m'
       self.color_yellow = '\033[33m'
+      self.underline = '\033[4m'
+      self.underline_reset = '\033[24m'
 
       self.link = lambda text, url: f'\033]8;;{url}\033\\{text}\033]8;;\033\\'
     else:
@@ -88,8 +93,9 @@ class Symbols:
       self.color_orange = ''
       self.color_red = ''
       self.color_reset = ''
-      self.color_underline = ''
       self.color_yellow = ''
+      self.underline = ''
+      self.underline_reset = ''
 
       self.link = lambda text, url: text
 
@@ -220,7 +226,7 @@ def render_item(
     desc = str(item.instance)
     desc_lines = desc.splitlines()
 
-    exc_type_name = type(item.instance).__name__
+    exc_type_name = wrap_into_ellipsis(type(item.instance).__name__, ellipsis=symbols.ellipsis, width=width)
     exc_type_sep = ': '
 
     # Non-empty descriptions with a single, short line
@@ -240,7 +246,7 @@ def render_item(
 
       if desc:
         for desc_line in desc_lines:
-          for wrapped_line in wrap_line(desc_line, width=desc_exp_width):
+          for wrapped_line in wrap_into_paragraph(desc_line, width=desc_exp_width):
             wrapped_line_prefixed = current_prefix + current_indent + desc_exp_add_indent + wrapped_line
             yield wrapped_line_prefixed, len(wrapped_line_prefixed)
 
@@ -278,7 +284,7 @@ def render_item(
         yield note_header, note_header_len
 
         for note_line in note_lines:
-          for wrapped_line in wrap_line(note_line, width=(note_width - len(note_exp_add_indent))):
+          for wrapped_line in wrap_into_paragraph(note_line, width=(note_width - len(note_exp_add_indent))):
             yield (
               note_prefix + note_exp_add_indent + wrapped_line,
               len(note_prefix) + len(note_exp_add_indent) + len(wrapped_line),
@@ -402,9 +408,11 @@ def render_frames(
   inset_repeat_box = True
   skip_newline_on_highlights_at_trace_ends = True
 
-  full_width = width + len(indent)
-  half_width = (width - 4) // 2
-  half_width_left = half_width + len(indent_str)
+  # full_width = width + len(indent)
+  # half_width = (width - 4) // 2
+  # half_width_left = half_width + len(indent_str)
+  most_width = max(width - 20, width * 7 // 10)
+  # most_width = width
 
   # Whether a newline is required before the next frame
   newline_required = False
@@ -436,73 +444,103 @@ def render_frames(
       frame_indent = indent
       repeat_box_indent = None
 
+    width_diff = len(indent) - len(frame_prefix) - len(frame_indent)
+    available_width = width + width_diff
+    most_available_width = most_width + width_diff
+
     for agg_frame_index, agg_frame in enumerate(atom.realization[:len(atom.keys)]):
       if newline_required:
         yield frame_prefix, len(frame_prefix)
 
       match agg_frame:
         case FrameItem():
-          frame = agg_frame
+          frame: FrameItem = agg_frame
 
 
-          # Frame title
-
-          frame_title_left = frame_prefix + frame_indent
-          frame_title_left_len = len(frame_prefix) + len(frame_indent)
+          # Frame left title
 
           frame_title_color = symbols.color_bright_black if not frame.important else ''
-          frame_title_left += frame_title_color
+
+          frame_title_left = 'at '
+          frame_title_left_len = len(frame_title_left)
+
+          title_left_suffix = ''
+
+          if frame.reraise:
+            title_left_suffix += ' [re-raise]'
+
+          if (atom.repeat_count > 1) and (len(atom.keys) == 1):
+            title_left_suffix += f' [repeated {atom.repeat_count} times]'
+
+          frame_title_left_len += len(title_left_suffix)
 
           if frame.target is not None:
-            target_name = None
-            target_type = None
+            ancestor_names = [ancestor.name for ancestor in frame.target.ancestors()]
 
-            for node in [frame.target.node, *frame.target.parents[::-1]]:
-              match node:
-                case ast.AsyncFunctionDef(name=name) | ast.FunctionDef(name=name):
-                  target_name = name
-                  target_type = 'function'
-                  break
-                case ast.ClassDef(name=name):
-                  target_name = name
-                  target_type = 'class'
-                  break
-                case ast.Module():
-                  target_type = 'module'
-                  break
+            if ancestor_names:
+              separator = f' {symbols.chevron_right} '
+              ancestor_name_lens = [len(name) for name in ancestor_names]
 
-            assert target_type is not None
+              condense_left_index, condense_right_index = condense_seq(
+                ancestor_name_lens,
+                ellipsis_width=len(symbols.ellipsis),
+                priority_left=False,
+                separator_width=len(separator),
+                width=(most_available_width - frame_title_left_len),
+              )
 
-            frame_title_target_type_str = f'at {target_type}'
-            frame_title_left += f'at {target_type}'
-            frame_title_left_len += len(frame_title_target_type_str)
+              if (condense_left_index < len(ancestor_names)) and (condense_right_index >= len(ancestor_names)):
+                ancestors_ellipsis = symbols.ellipsis + separator if len(ancestor_names) > 1 else ''
+                wrapped_target_name = wrap_into_ellipsis(ancestor_names[-1], ellipsis=symbols.ellipsis, width=(most_available_width - frame_title_left_len))
 
-            if target_name is not None:
-              frame_title_left += ' '
-              frame_title_left_len += 1
+                frame_title_left += ancestors_ellipsis + symbols.underline + wrapped_target_name + symbols.underline_reset
+                frame_title_left_len += len(ancestors_ellipsis) + len(wrapped_target_name)
+              else:
+                string, string_len = format_condensed_seq(
+                  [
+                    symbols.underline + name + symbols.underline_reset if name_index == len(ancestor_names) - 1 else name
+                    for name_index, name in enumerate(ancestor_names)
+                  ],
+                  ancestor_name_lens,
+                  (condense_left_index, condense_right_index),
+                  ellipsis=symbols.ellipsis,
+                  ellipsis_width=len(symbols.ellipsis),
+                  separator=separator,
+                  separator_width=len(separator),
+                )
 
-              frame_title_left += symbols.color_underline
+                frame_title_left += string
+                frame_title_left_len += string_len
 
-              target_name_wrapped = wrap_with_ellipsis(target_name, ellipsis=symbols.ellipsis, width=(half_width_left - frame_title_left_len))
-              # target_name_wrapped = 'y' * (half_width_left - frame_title_left_len)
 
-              frame_title_left += target_name_wrapped
-              frame_title_left += symbols.color_reset
-              frame_title_left += frame_title_color
+              # string = condense_parts(
+              #   ancestor_names,
+              #   ellipsis=symbols.ellipsis,
+              #   enforce_right=True,
+              #   priority_left=False,
+              #   separator=f' {symbols.chevron_right} ',
+              #   width=(most_available_width - frame_title_left_len),
+              # )
 
-              frame_title_left_len += len(target_name_wrapped)
-          else:
-            frame_title_left += 'at '
-            frame_title_left_len += 3
-
-            if frame.module.label is not None:
-              target_name_wrapped = wrap_with_ellipsis(frame.module.label, ellipsis=symbols.ellipsis, width=(half_width_left - frame_title_left_len))
+              # frame_title_left += string
+              # frame_title_left_len += len(string)
             else:
-              target_name_wrapped = ' unknown module'
+              string = 'module'
+              frame_title_left += string
+              frame_title_left_len += len(string)
+          else:
+            if frame.module.label is not None:
+              target_name_wrapped = wrap_into_ellipsis(frame.module.label, ellipsis=symbols.ellipsis, width=(most_available_width - frame_title_left_len))
+            else:
+              target_name_wrapped = 'unknown module'
 
             frame_title_left += target_name_wrapped
             frame_title_left_len += len(target_name_wrapped)
 
+          frame_title_left += title_left_suffix
+
+
+          # Frame right title
 
           # if frame.module.name_segments is not None:
           #   frame_title_details += f'in {'.'.join(frame.module.name_segments)}'
@@ -526,38 +564,34 @@ def render_frames(
             else:
               line_start_fmt = ''
 
-            condensed_path = condense_path(path_parts, ellipsis=symbols.ellipsis, width=(half_width - len(line_start_fmt)))
-            # condensed_path = (half_width - len(line_start_fmt)) * 'x'
+            condensed_path, condensed_path_len = condense_parts(path_parts, ellipsis=symbols.ellipsis, separator='/', width=(most_available_width - len(line_start_fmt)))
+
             frame_title_right = symbols.link(condensed_path, frame.module.path.as_uri()) if options.target_links else condensed_path
             frame_title_right += line_start_fmt
-            frame_title_right_len = len(condensed_path) + len(line_start_fmt)
+            frame_title_right_len = condensed_path_len + len(line_start_fmt)
           else:
             frame_title_right = ''
             frame_title_right_len = 0
 
-          # if frame.reraise:
-          #   frame_title_right += ' [re-raise]'
 
-          # if (atom.repeat_count > 1) and (len(atom.keys) == 1):
-          #   frame_title_right += f' [repeated {atom.repeat_count} times]'
+          # Frame title joining
 
-          frame_title = frame_title_left
+          if frame_title_left_len + frame_title_right_len < available_width - 8:
+            yield (
+              frame_prefix + frame_indent + frame_title_color + frame_title_left + ' ' * (available_width - frame_title_left_len - frame_title_right_len) + frame_title_right + symbols.color_reset,
+              len(frame_prefix) + len(frame_indent) + available_width,
+            )
 
-          if frame_title_right:
-            frame_title += ' ' * (full_width - frame_title_left_len - frame_title_right_len) + frame_title_right
+          else:
+            yield (
+              frame_prefix + frame_indent + frame_title_color + frame_title_left + symbols.color_reset,
+              len(frame_prefix) + len(frame_indent) + frame_title_left_len,
+            )
 
-          yield frame_title, full_width
-
-          # if frame.reraise:
-          #   reraise_message = f'{frame_indent}{indent_str}Reraised'
-          #   yield symbols.color_orange + reraise_message + symbols.color_reset, len(reraise_message)
-
-          if (atom.repeat_count > 1) and (len(atom.keys) == 1):
-            # message = f' [repeated {atom.repeat_count} times]'
-            # yield ' ' * (width - len(message)) + message, width
-            yield f'  [repeated {atom.repeat_count} times]', 0
-
-            # yield f' [repeated {atom.repeat_count} times]', 1
+            yield (
+              frame_prefix + frame_indent + ' ' * (available_width - frame_title_right_len) + frame_title_color + frame_title_right + symbols.color_reset,
+              available_width,
+            )
 
 
           # Frame trace

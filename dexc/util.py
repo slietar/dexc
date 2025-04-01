@@ -8,51 +8,49 @@ class UnreachableError(Exception):
   pass
 
 
-def condense_path(parts: Sequence[str], /, *, ellipsis: str, priority_left: bool = False, width: int):
+def condense_parts(parts: Sequence[str], /, *, ellipsis: str, priority_left: bool = False, separator: str, width: int):
+  part_lens = [len(part) for part in parts]
   left_index, right_index = condense_seq(
-    [len(part) for part in parts],
+    part_lens,
     ellipsis_width=len(ellipsis),
     priority_left=priority_left,
-    separator_width=1,
+    separator_width=len(separator),
     width=width,
   )
 
   return format_condensed_seq(
     parts,
+    part_lens,
     (left_index, right_index),
     ellipsis=ellipsis,
-    separator='/',
+    ellipsis_width=len(ellipsis),
+    separator=separator,
+    separator_width=len(separator),
   )
 
 
 def condense_seq(
-  item_widths: Sequence[int],
+  part_lens: Sequence[int],
   /, *,
   ellipsis_width: int,
   priority_left: bool = False,
-  separator_width: int = 1,
+  separator_width: int,
   width: int,
 ):
   assert width >= ellipsis_width
 
   left_index = 0
-  right_index = len(item_widths)
+  right_index = len(part_lens)
 
   left_width = 0
   right_width = 0
 
-  # instric_width = sum(item_widths) + sep_width * (len(item_widths) - 1)
-  # print(f'{instric_width=}')
-
-  # if instric_width <= width:
-  #   return 0, 0
-
   while left_index != right_index:
     left_sep_width = separator_width if left_index > 0 else 0
-    right_sep_width = separator_width if right_index < len(item_widths) else 0
+    right_sep_width = separator_width if right_index < len(part_lens) else 0
 
-    new_left_width = left_width + left_sep_width + item_widths[left_index]
-    new_right_width = right_width + right_sep_width + item_widths[right_index - 1]
+    new_left_width = left_width + left_sep_width + part_lens[left_index]
+    new_right_width = right_width + right_sep_width + part_lens[right_index - 1]
 
     joining = right_index - left_index == 1
 
@@ -71,47 +69,42 @@ def condense_seq(
     else:
       break
 
-    # print('!', new_left_width + join_width + right_width, width)
-    # print(new_left_width, join_width, right_width, width)
-    # if (left_width < right_width) and ():
-    #   left_index += 1
-    #   left_width = new_left_width
-    #   continue
-
-    # if left_width + left_sep_width + (ellipsis_width + sep_width if not joining else 0) + new_right_width <= width:
-    #   right_index -= 1
-    #   right_width = new_right_width
-    #   continue
-
-    # if new_left_width + (sep_width + ellipsis_width if not joining else 0) + right_sep_width + right_width <= width:
-    #   left_index += 1
-    #   left_width = new_left_width
-    #   continue
-
-    # break
-
   return left_index, right_index
 
 
-def format_condensed_seq(items: Sequence[str], indices: tuple[int, int], *, ellipsis: str, separator: str):
+def format_condensed_seq(
+  parts: Sequence[str],
+  part_lens: Sequence[int],
+  indices: tuple[int, int],
+  *,
+  ellipsis: str,
+  ellipsis_width: int,
+  separator: str,
+  separator_width: int,
+):
   left_index, right_index = indices
-  output = separator.join(items[:left_index])
+  output = separator.join(parts[:left_index])
+  total_len = sum(part_lens[:left_index]) + left_index * separator_width
 
   if (left_index > 0) and (
-    (right_index < len(items)) or
+    (right_index < len(parts)) or
     (left_index != right_index)
   ):
     output += separator
+    total_len += separator_width
 
   if left_index != right_index:
     output += ellipsis
+    total_len += ellipsis_width
 
-    if right_index < len(items):
+    if right_index < len(parts):
       output += separator
+      total_len += separator_width
 
-  output += separator.join(items[right_index:])
+  output += separator.join(parts[right_index:])
+  total_len += sum(part_lens[right_index:]) + (len(parts) - right_index - 1) * separator_width
 
-  return output
+  return output, total_len
 
 
 def create_tb(start_depth: int = 0):
@@ -187,7 +180,7 @@ def lcount_whitespace(text: str, chars: Optional[str] = None, /):
 def rcount_whitespace(text: str, chars: Optional[str] = None, /):
   return len(text) - len(text.rstrip(chars))
 
-def wrap_line(line: str, /, *, maintain_indent: bool = True, max_indent: int = 20, width: int): # -> Iterable[str]:
+def wrap_into_paragraph(line: str, /, *, maintain_indent: bool = True, max_indent: int = 20, width: int): # -> Iterable[str]:
   line_indent = min(len(line) - len(line.lstrip()), max_indent) if maintain_indent else 0
   available_width = width - line_indent
 
@@ -209,10 +202,10 @@ def wrap_line(line: str, /, *, maintain_indent: bool = True, max_indent: int = 2
   yield line[:line_indent] + line[current_index:]
 
 
-def wrap_with_ellipsis(target: str, /, *, ellipsis: str, width: int):
+def wrap_into_ellipsis(target: str, /, *, ellipsis: str, margin: int = 0, width: int):
   assert len(ellipsis) <= width
 
-  if len(target) <= width:
+  if len(target) <= width - margin:
     return target
 
   return target[:(width - len(ellipsis))] + ellipsis

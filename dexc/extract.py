@@ -2,17 +2,35 @@ import ast
 import itertools
 from dataclasses import dataclass, field
 from types import TracebackType
-from typing import Literal, Optional
+from typing import Iterable, Literal, Optional
 
 from .inspector import ModuleInfo, ModuleInspector, ModuleKind
 
 
+type AncestorKind = Literal['class', 'function', 'method']
 type AstNode = ast.Module | ast.expr | ast.stmt
+
+@dataclass(frozen=True, slots=True)
+class Ancestor:
+  kind: AncestorKind
+  name: str
 
 @dataclass(frozen=True, slots=True)
 class AstTarget:
   node: AstNode
   parents: list[AstNode] = field(hash=False)
+
+  def ancestors(self) -> Iterable[Ancestor]:
+    prev_class = False
+
+    for parent_node in self.parents:
+      match parent_node:
+        case ast.AsyncFunctionDef(name=name) | ast.FunctionDef(name=name):
+          yield Ancestor('method' if prev_class else 'function', name)
+          prev_class = False
+        case ast.ClassDef(name=name):
+          yield Ancestor('class', name)
+          prev_class = True
 
 
 @dataclass(frozen=True, slots=True)
