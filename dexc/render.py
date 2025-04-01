@@ -1,4 +1,3 @@
-import ast
 import math
 import os
 import sys
@@ -7,20 +6,19 @@ from pprint import pprint
 from typing import (IO, Any, Callable, Container, Generator, Iterable, Literal,
                     Optional, Sequence)
 
+from . import util
 from .compression import Atom
 from .compression.greedy import compress
-from .extract import ExceptionChain, FrameItem, ModuleInfo
+from .extract import (ExceptionChain, FrameAreaFull, FrameAreaLines,
+                      FrameAreaStartLine, FrameAreaStartLineCol, FrameItem,
+                      ModuleInfo)
 from .options import Options
-from .util import (UnreachableError, condense_parts, condense_seq, find_common_ancestors, format_condensed_seq,
-                   reversed_if, wrap_into_paragraph, wrap_into_ellipsis)
+from .util import UnreachableError
 from .vendor import get_ipython
 
 
 def get_integer_width(x: int, /):
   return max(math.ceil(math.log10(x + 1)), 1)
-
-def get_line_indentation(line: str, /):
-  return len(line) - len(line.lstrip())
 
 def get_common_indentation(lines: list[str], /):
   return min(len(line) - len(stripped_line) for line in lines if (stripped_line := line.lstrip()))
@@ -226,7 +224,7 @@ def render_item(
     desc = str(item.instance)
     desc_lines = desc.splitlines()
 
-    exc_type_name = wrap_into_ellipsis(type(item.instance).__name__, ellipsis=symbols.ellipsis, width=width)
+    exc_type_name = util.wrap_into_ellipsis(type(item.instance).__name__, ellipsis=symbols.ellipsis, width=width)
     exc_type_sep = ': '
 
     # Non-empty descriptions with a single, short line
@@ -246,7 +244,7 @@ def render_item(
 
       if desc:
         for desc_line in desc_lines:
-          for wrapped_line in wrap_into_paragraph(desc_line, width=desc_exp_width):
+          for wrapped_line in util.wrap_into_paragraph(desc_line, width=desc_exp_width):
             wrapped_line_prefixed = current_prefix + current_indent + desc_exp_add_indent + wrapped_line
             yield wrapped_line_prefixed, len(wrapped_line_prefixed)
 
@@ -284,7 +282,7 @@ def render_item(
         yield note_header, note_header_len
 
         for note_line in note_lines:
-          for wrapped_line in wrap_into_paragraph(note_line, width=(note_width - len(note_exp_add_indent))):
+          for wrapped_line in util.wrap_into_paragraph(note_line, width=(note_width - len(note_exp_add_indent))):
             yield (
               note_prefix + note_exp_add_indent + wrapped_line,
               len(note_prefix) + len(note_exp_add_indent) + len(wrapped_line),
@@ -315,8 +313,8 @@ def render_item(
 
       trace_indices = set[tuple[int, int]]()
 
-      for atom_inner_index, (atom_display_index, atom) in enumerate(reversed_if(list(enumerate(atoms)), not options.inner_frame_on_top)):
-        for agg_frame_index, agg_frame in reversed_if(list(enumerate(atom.realization[:len(atom.keys)])), not options.inner_frame_on_top):
+      for atom_inner_index, (atom_display_index, atom) in enumerate(util.reversed_if(list(enumerate(atoms)), not options.inner_frame_on_top)):
+        for agg_frame_index, agg_frame in util.reversed_if(list(enumerate(atom.realization[:len(atom.keys)])), not options.inner_frame_on_top):
           if isinstance(agg_frame, FrameItem) and agg_frame.important and agg_frame.traceable and (len(trace_indices) < options.max_traces):
             trace_indices.add((atom_display_index, agg_frame_index))
 
@@ -481,7 +479,7 @@ def render_frames(
               separator = f' {symbols.chevron_right} '
               ancestor_name_lens = [len(name) for name in ancestor_names]
 
-              condense_left_index, condense_right_index = condense_seq(
+              condense_left_index, condense_right_index = util.condense_seq(
                 ancestor_name_lens,
                 ellipsis_width=len(symbols.ellipsis),
                 priority_left=False,
@@ -491,12 +489,12 @@ def render_frames(
 
               if (condense_left_index < len(ancestor_names)) and (condense_right_index >= len(ancestor_names)):
                 ancestors_ellipsis = symbols.ellipsis + separator if len(ancestor_names) > 1 else ''
-                wrapped_target_name = wrap_into_ellipsis(ancestor_names[-1], ellipsis=symbols.ellipsis, width=(most_available_width - frame_title_left_len))
+                wrapped_target_name = util.wrap_into_ellipsis(ancestor_names[-1], ellipsis=symbols.ellipsis, width=(most_available_width - frame_title_left_len))
 
                 frame_title_left += ancestors_ellipsis + symbols.underline + wrapped_target_name + symbols.underline_reset
                 frame_title_left_len += len(ancestors_ellipsis) + len(wrapped_target_name)
               else:
-                string, string_len = format_condensed_seq(
+                string, string_len = util.format_condensed_seq(
                   [
                     symbols.underline + name + symbols.underline_reset if name_index == len(ancestor_names) - 1 else name
                     for name_index, name in enumerate(ancestor_names)
@@ -511,31 +509,19 @@ def render_frames(
 
                 frame_title_left += string
                 frame_title_left_len += string_len
-
-
-              # string = condense_parts(
-              #   ancestor_names,
-              #   ellipsis=symbols.ellipsis,
-              #   enforce_right=True,
-              #   priority_left=False,
-              #   separator=f' {symbols.chevron_right} ',
-              #   width=(most_available_width - frame_title_left_len),
-              # )
-
-              # frame_title_left += string
-              # frame_title_left_len += len(string)
             else:
               string = 'module'
               frame_title_left += string
               frame_title_left_len += len(string)
           else:
-            if frame.module.label is not None:
-              target_name_wrapped = wrap_into_ellipsis(frame.module.label, ellipsis=symbols.ellipsis, width=(most_available_width - frame_title_left_len))
+            if frame.target_name is not None:
+              string = util.wrap_into_ellipsis(frame.target_name, ellipsis=symbols.ellipsis, width=(most_available_width - frame_title_left_len))
+              frame_title_left += symbols.underline + string + symbols.underline_reset
+              frame_title_left_len += len(string)
             else:
-              target_name_wrapped = 'unknown module'
-
-            frame_title_left += target_name_wrapped
-            frame_title_left_len += len(target_name_wrapped)
+              string = 'unknown location'
+              frame_title_left += string
+              frame_title_left_len += len(string)
 
           frame_title_left += title_left_suffix
 
@@ -549,6 +535,13 @@ def render_frames(
           # else:
           #   frame_title_details += 'in unknown module'
 
+          if frame.area is not None:
+            line_start_fmt = f':{frame.area.line_start}'
+          else:
+            line_start_fmt = ''
+
+          frame_title_right_len = len(line_start_fmt)
+
           if frame.module.relative_path is not None:
             assert frame.module.path is not None
 
@@ -559,19 +552,20 @@ def render_frames(
 
             path_parts += frame.module.relative_path.parts
 
-            if frame.area.line_start is not None:
-              line_start_fmt = f':{frame.area.line_start}'
-            else:
-              line_start_fmt = ''
-
-            condensed_path, condensed_path_len = condense_parts(path_parts, ellipsis=symbols.ellipsis, separator='/', width=(most_available_width - len(line_start_fmt)))
+            condensed_path, condensed_path_len = util.condense_parts(path_parts, ellipsis=symbols.ellipsis, separator='/', width=(most_available_width - frame_title_right_len))
 
             frame_title_right = symbols.link(condensed_path, frame.module.path.as_uri()) if options.target_links else condensed_path
-            frame_title_right += line_start_fmt
-            frame_title_right_len = condensed_path_len + len(line_start_fmt)
+            frame_title_right_len += condensed_path_len
+          elif frame.module.label is not None:
+            string = util.wrap_into_ellipsis(frame.module.label, ellipsis=symbols.ellipsis, width=(most_available_width - frame_title_right_len))
+            frame_title_right = string
+            frame_title_right_len += len(string)
           else:
-            frame_title_right = ''
-            frame_title_right_len = 0
+            string = '<unknown>'
+            frame_title_right = string
+            frame_title_right_len += len(string)
+
+          frame_title_right += line_start_fmt
 
 
           # Frame title joining
@@ -599,18 +593,32 @@ def render_frames(
           if (atom_index, agg_frame_index) in trace_indices:
             frame = agg_frame
 
+            assert frame.area is not None
+            assert frame.module.source is not None
+
             line_start = frame.area.line_start
             line_end = frame.area.line_end
             col_start = frame.area.col_start
             col_end = frame.area.col_end
 
-            assert line_start is not None
-            assert line_end is not None
-            assert col_start is not None
-            assert col_end is not None
-            assert frame.module.source is not None
-
             code_lines = frame.module.source.splitlines()
+
+            match frame.area:
+              case FrameAreaFull(line_start, line_end, col_start, col_end):
+                pass
+              case FrameAreaLines(line_start, line_end):
+                col_start = util.lcount_whitespace(code_lines[line_start - 1])
+                col_end = len(code_lines[line_end - 1]) - util.rcount_whitespace(code_lines[line_end - 1])
+              case FrameAreaStartLineCol(line_start, col_start):
+                line_end = line_start
+                col_end = col_start + 1
+              case FrameAreaStartLine(line_start):
+                line_end = line_start
+                col_start = 0
+                col_start = util.lcount_whitespace(code_lines[line_start - 1])
+                col_end = len(code_lines[line_end - 1]) - util.rcount_whitespace(code_lines[line_end - 1])
+              case _:
+                raise UnreachableError
 
 
             # Compute target line range
@@ -670,7 +678,7 @@ def render_frames(
 
             for rel_line_index, line in enumerate(target_lines):
               line_number = line_start + rel_line_index
-              line_indent = get_line_indentation(line) if options.skip_indentation_highlight else 0
+              line_indent = util.lcount_whitespace(line) if options.skip_indentation_highlight else 0
 
               if line_number == line_start:
                 anchor_start = col_start
@@ -751,7 +759,7 @@ def render_frames(
 
           module_segments_list = [map_frame(frame) for frame in agg_frames]
 
-          agg_name_segments = find_common_ancestors(module_segments_list)
+          agg_name_segments = util.find_common_ancestors(module_segments_list)
           module_unique = all(len(name_segments) == len(agg_name_segments) for name_segments in module_segments_list)
 
           target_fmt = (

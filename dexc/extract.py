@@ -1,10 +1,12 @@
+from abc import ABC
 import ast
+import builtins
 import itertools
 from dataclasses import dataclass, field
-from types import TracebackType
+from types import NoneType, TracebackType
 from typing import Iterable, Literal, Optional
 
-from .inspector import ModuleInfo, ModuleInspector, ModuleKind
+from .inspector import ModuleInfo, ModuleInspector
 
 
 type AncestorKind = Literal['class', 'function', 'method']
@@ -34,18 +36,62 @@ class AstTarget:
 
 
 @dataclass(frozen=True, slots=True)
-class FrameArea:
-  line_start: Optional[int]
-  line_end: Optional[int]
-  col_start: Optional[int]
-  col_end: Optional[int]
+class FrameArea(ABC):
+  # Line numbers start at 1 and both ends are inclusive
+  # Column numbers start at 0 and only the start is inclusive
+
+  line_start: int
+  line_end: Optional[int] = field(default=None, init=False)
+  col_start: Optional[int] = field(default=None, init=False)
+  col_end: Optional[int] = field(default=None, init=False)
+
+@dataclass(frozen=True, slots=True)
+class FrameAreaStartLine(FrameArea):
+  pass
+
+@dataclass(frozen=True, slots=True)
+class FrameAreaStartLineCol(FrameArea):
+  col_start: int
+
+@dataclass(frozen=True, slots=True)
+class FrameAreaLines(FrameArea):
+  line_end: int
+  col_start: NoneType = field(default=None, init=False)
+
+@dataclass(frozen=True, slots=True)
+class FrameAreaFull(FrameArea):
+  line_end: int
+  col_start: int
+  col_end: int
+
+# type FrameArea = FrameAreaFull | FrameAreaLines | FrameAreaStartLine | FrameAreaStartLineCol
+
+def create_frame_area(
+  line_start: Optional[int],
+  line_end: Optional[int],
+  col_start: Optional[int],
+  col_end: Optional[int],
+) -> Optional[FrameArea]:
+  match line_start, line_end, col_start, col_end:
+    case builtins.int(), builtins.int(), builtins.int(), builtins.int():
+      return FrameAreaFull(line_start, line_end, col_start, col_end)
+    case builtins.int(), builtins.int(), _, _:
+      return FrameAreaLines(line_start, line_end)
+    case builtins.int(), _, builtins.int(), _:
+      return FrameAreaStartLineCol(line_start, col_start)
+    case builtins.int(), _, _, _:
+      return FrameAreaStartLine(line_start)
+    case _:
+      return None
+
 
 @dataclass(eq=True, frozen=True, slots=True)
 class FrameItem:
-  area: FrameArea
+  area: Optional[FrameArea]
   hidden: bool
   module: ModuleInfo
   target: Optional[AstTarget]
+  target_name: Optional[str]
   reraise: bool
 
   @property
@@ -54,8 +100,7 @@ class FrameItem:
 
   @property
   def traceable(self):
-    # TODO: Add conditions on area
-    return self.module.source is not None
+    return (self.module.source is not None) and (self.area is not None)
 
 
 type ExceptionChainRelation = Literal['cause', 'context']
@@ -113,20 +158,24 @@ def extract_exc_frames(exc: BaseException, /):
   # Detect syntax error
   if isinstance(exc, SyntaxError) and (exc.filename is not None):
     module_info = ModuleInspector().inspect(exc.filename)
+    area = create_frame_area(
+      line_start=exc.lineno,
+      line_end=exc.end_lineno,
+      col_start=(exc.offset - 1 if exc.offset is not None else None),
+      col_end=(
+        (exc.end_offset - 1 if (exc.end_offset > 0) else exc.offset)
+        if exc.end_offset is not None
+        else None
+      ),
+    )
 
     frame = FrameItem(
-      area=FrameArea(
-        exc.lineno,
-        exc.end_lineno,
-        (exc.offset - 1) if exc.offset is not None else None,
-        (
-          (exc.end_offset - 1) if exc.end_offset > 0 else exc.offset
-        ) if exc.end_offset is not None else None,
-      ),
+      area=area,
       hidden=False,
       module=module_info,
       reraise=False,
       target=None,
+      target_name=None,
     )
 
     frames.append(frame)
@@ -159,16 +208,10 @@ def extract_tb_frames(start_tb: TracebackType, /):
       itertools.islice(frame_code.co_positions(), tb.tb_lasti // 2, None)
     ) if tb.tb_lasti >= 0 else None
 
-    area = FrameArea(
-      positions[0] if positions is not None else None,
-      positions[1] if positions is not None else None,
-      positions[2] if positions is not None else None,
-      positions[3] if positions is not None else None,
-    )
-
+    area = create_frame_area(*positions) if positions is not None else None
     module_info = inspector.inspect(frame.f_code.co_filename, frame)
 
-    if module_info.ast is not None:
+    if (module_info.ast is not None) and (area is not None):
       target = identify_node(module_info.ast, area)
     else:
       target = None
@@ -184,6 +227,7 @@ def extract_tb_frames(start_tb: TracebackType, /):
       hidden=hidden,
       module=module_info,
       target=target,
+      target_name=frame.f_code.co_name,
       reraise=((tb_index > 0) and (target is not None) and isinstance(target.node, ast.Raise)),
     )
 
@@ -196,7 +240,7 @@ def identify_node(module: ast.Module, area: FrameArea):
   line_start = area.line_start
   line_end = area.line_end
 
-  if (line_start is None) or (line_end is None):
+  if line_end is None:
     return None
 
   def node_matches(node: ast.expr | ast.stmt):
