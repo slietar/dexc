@@ -89,6 +89,21 @@ class TestUtil(unittest.TestCase):
       ['foo  bar'],
     )
 
+    self.assertEqual(
+      list(wrap_into_paragraph('foo-bar', width=5)),
+      ['foo-', 'bar'],
+    )
+
+    self.assertEqual(
+      list(wrap_into_paragraph('foo barbarbar', width=6)),
+      ['foo', 'barbar', 'bar'],
+    )
+
+    self.assertEqual(
+      list(wrap_into_paragraph('foo barbarbar', max_trailing_whitespace=1, width=6)),
+      ['foo ba', 'rbarba', 'r'],
+    )
+
 
 if __name__ == '__main__':
     unittest.main()

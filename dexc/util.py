@@ -1,3 +1,4 @@
+import re
 import sys
 from pathlib import Path
 from types import TracebackType
@@ -180,21 +181,35 @@ def lcount_whitespace(text: str, chars: Optional[str] = None, /):
 def rcount_whitespace(text: str, chars: Optional[str] = None, /):
   return len(text) - len(text.rstrip(chars))
 
-def wrap_into_paragraph(line: str, /, *, maintain_indent: bool = True, max_indent: int = 20, width: int): # -> Iterable[str]:
-  line_indent = min(len(line) - len(line.lstrip()), max_indent) if maintain_indent else 0
+def wrap_into_paragraph(line: str, /, *, maintain_indent: bool = True, max_indent: int = 20, max_trailing_whitespace: int = 20, width: int): # -> Iterable[str]:
+  line_indent = min(lcount_whitespace(line), max_indent) if maintain_indent else 0
   available_width = width - line_indent
 
   current_index = line_indent
 
-  while len(line) - current_index > available_width:
-    split_index = line.rfind(' ', current_index, current_index + available_width + 1)
+  break_patterns = [
+    re.compile(str_pattern) for str_pattern in [
+      r'\s+()',
+      r'.\b()',
+      r'.()',
+    ]
+  ]
 
-    if split_index >= 0:
-      left_index = split_index - rcount_whitespace(line[current_index:split_index])
-      right_index = split_index + 1
+  while len(line) - current_index > available_width:
+    for pattern in break_patterns:
+      match = pattern.search(line[current_index:(current_index + available_width + 1)][::-1])
+
+      if match:
+        assert match.start(1) > 0
+        offset = match.start(1) - 1
+
+        if 0 <= offset < min(max_trailing_whitespace + 1, available_width):
+          left_index = current_index + available_width - offset
+          right_index = left_index + lcount_whitespace(line[left_index:])
+          break
     else:
-      left_index = current_index + available_width
-      right_index = current_index + available_width
+      # The last pattern should always match
+      raise UnreachableError
 
     yield line[:line_indent] + line[current_index:left_index]
     current_index = right_index + lcount_whitespace(line[right_index:])
