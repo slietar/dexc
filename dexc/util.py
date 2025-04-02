@@ -2,7 +2,7 @@ import re
 import sys
 from pathlib import Path
 from types import TracebackType
-from typing import Iterable, Optional, Reversible, Sequence
+from typing import Callable, Iterable, Optional, Reversible, Sequence
 
 
 class UnreachableError(Exception):
@@ -181,40 +181,139 @@ def lcount_whitespace(text: str, chars: Optional[str] = None, /):
 def rcount_whitespace(text: str, chars: Optional[str] = None, /):
   return len(text) - len(text.rstrip(chars))
 
-def wrap_into_paragraph(line: str, /, *, maintain_indent: bool = True, max_indent: int = 20, max_trailing_whitespace: int = 20, width: int): # -> Iterable[str]:
-  line_indent = min(lcount_whitespace(line), max_indent) if maintain_indent else 0
-  available_width = width - line_indent
 
-  current_index = line_indent
+def wrap_into_paragraph(
+  text: str, /, *,
+  link: Optional[Callable] = None,
+  maintain_indent: bool = True,
+  max_indent: int = 20,
+  max_trailing_whitespace: int = 20,
+  width: int,
+):
+  indent = min(lcount_whitespace(text), max_indent) if maintain_indent else 0
+  truncated_text = text[indent:]
 
-  break_patterns = [
-    re.compile(str_pattern) for str_pattern in [
-      r'\s+()',
-      r'.\b()',
-      r'.()',
-    ]
+  line_indices = wrap_into_paragraph_indices(
+    truncated_text,
+    max_trailing_whitespace=max_trailing_whitespace,
+    width=(width - indent),
+  )
+
+  if link is not None:
+    for line, line_len in wrap_into_paragraph_format_links(truncated_text, line_indices, link=link):
+      yield (
+        text[:indent] + line,
+        indent + line_len,
+      )
+  else:
+    for line_start, line_end in line_indices:
+      yield (
+        text[:indent] + truncated_text[line_start:line_end],
+        indent + line_end - line_start,
+      )
+
+
+BREAK_PATTERNS = [
+  re.compile(str_pattern) for str_pattern in [
+    r'\s+()',
+    r'.\b()',
+    r'.()',
   ]
+]
 
-  while len(line) - current_index > available_width:
-    for pattern in break_patterns:
-      match = pattern.search(line[current_index:(current_index + available_width + 1)][::-1])
+def wrap_into_paragraph_indices(text: str, /, *, max_trailing_whitespace: int = 20, width: int): # -> Iterable[str]:
+  current_index = 0
+  stripped_text = text.rstrip()
+
+  while len(stripped_text) - current_index > width:
+    for pattern in BREAK_PATTERNS:
+      match = pattern.search(stripped_text[current_index:(current_index + width + 1)][::-1])
 
       if match:
         assert match.start(1) > 0
         offset = match.start(1) - 1
 
-        if 0 <= offset < min(max_trailing_whitespace + 1, available_width):
-          left_index = current_index + available_width - offset
-          right_index = left_index + lcount_whitespace(line[left_index:])
+        if 0 <= offset < min(max_trailing_whitespace + 1, width):
+          left_index = current_index + width - offset
+          right_index = left_index + lcount_whitespace(stripped_text[left_index:])
           break
     else:
       # The last pattern should always match
       raise UnreachableError
 
-    yield line[:line_indent] + line[current_index:left_index]
-    current_index = right_index + lcount_whitespace(line[right_index:])
+    yield current_index, left_index
+    current_index = right_index + lcount_whitespace(stripped_text[right_index:])
 
-  yield line[:line_indent] + line[current_index:]
+  yield current_index, len(stripped_text)
+
+
+URL_PATTERN = re.compile(r'https?:\/\/[^\s]+')
+
+def wrap_into_paragraph_format_links(text: str, line_indices: Iterable[tuple[int, int]], /, *, link: Callable) -> Iterable[tuple[str, int]]:
+  matches = [(match.start(), match.end(), match.group()) for match in URL_PATTERN.finditer(text)]
+
+  current_match_index = 0
+  current_match_started = False
+
+  for line_start, line_end in line_indices:
+    # print()
+    # print('line', text[line_start:line_end])
+
+    current_index = line_start
+
+    formatted_line = ''
+    formatted_line_len = 0
+
+    while True:
+      # print(current_match_index, current_match_started)
+
+      if current_match_index >= len(matches):
+        formatted_line += text[current_index:line_end]
+        formatted_line_len += line_end - current_index
+        break
+
+      current_match_start, current_match_end, current_match_url = matches[current_match_index]
+
+      if current_match_started:
+        new_current_index = min(current_match_end, line_end)
+
+        formatted_line += link(text[current_index:new_current_index], current_match_url)
+        formatted_line_len += new_current_index - current_index
+
+        current_index = new_current_index
+
+        # If we didn't reach the match end
+        if current_index < current_match_end:
+          break
+
+        current_match_started = False
+        current_match_index += 1
+      else:
+        new_current_index = min(current_match_start, line_end)
+
+        formatted_line += text[current_index:new_current_index]
+        formatted_line_len += new_current_index - current_index
+
+        current_index = new_current_index
+
+        # If we didn't reach the match start
+        if current_index < current_match_start:
+          break
+
+        current_match_started = True
+
+    # print('finally', current_match_index, current_match_started)
+
+    yield formatted_line, formatted_line_len
+
+  # print()
+  # print()
+
+# print(list(wrap_into_paragraph('foo https://google.com bar', width=10)))
+# print(list(wrap_into_paragraph_with_links('foo https://google.com', width=10)))
+# print(list(wrap_into_paragraph('foo https://google.com xp http://foo.com             ', link=(lambda x, _: f'[{x}]'), width=10)))
+
+# print(list(wrap_into_paragraph('  Lorem ipsum dolor sit amet, consectetur adipisci elit.', width=12)))
 
 
 def wrap_into_ellipsis(target: str, /, *, ellipsis: str, margin: int = 0, width: int):

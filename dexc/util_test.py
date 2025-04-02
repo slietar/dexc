@@ -1,3 +1,4 @@
+from typing import Iterable
 import unittest
 
 from .util import format_condensed_seq, wrap_into_ellipsis, wrap_into_paragraph
@@ -54,54 +55,73 @@ class TestUtil(unittest.TestCase):
      )
 
   def test_wrap_into_paragraph(self):
+    def first_item(tup: Iterable[tuple[str, int]]):
+      for item, _ in tup:
+        yield item
+
     self.assertEqual(
-      list(wrap_into_paragraph('  Lorem ipsum dolor sit amet, consectetur adipisci elit.', width=12)),
+      list(first_item(wrap_into_paragraph('  Lorem ipsum dolor sit amet, consectetur adipisci elit.', width=12))),
       ['  Lorem', '  ipsum', '  dolor sit', '  amet,', '  consectetu', '  r adipisci', '  elit.'],
     )
 
     self.assertEqual(
-      list(wrap_into_paragraph('foo bar', width=3)),
+      list(first_item(wrap_into_paragraph('foo bar', width=3))),
       ['foo', 'bar'],
     )
 
     self.assertEqual(
-      list(wrap_into_paragraph('foo bar', width=2)),
+      list(first_item(wrap_into_paragraph('foo bar', width=2))),
       ['fo', 'o', 'ba', 'r'],
     )
 
     self.assertEqual(
-      list(wrap_into_paragraph('foo  bar', width=3)),
+      list(first_item(wrap_into_paragraph('foo  bar', width=3))),
       ['foo', 'bar'],
     )
 
     self.assertEqual(
-      list(wrap_into_paragraph('foo  bar', width=4)),
+      list(first_item(wrap_into_paragraph('foo  bar', width=4))),
       ['foo', 'bar'],
     )
 
     self.assertEqual(
-      list(wrap_into_paragraph('foo  bar', width=7)),
+      list(first_item(wrap_into_paragraph('foo  bar', width=7))),
       ['foo', 'bar'],
     )
 
     self.assertEqual(
-      list(wrap_into_paragraph('foo  bar', width=8)),
+      list(first_item(wrap_into_paragraph('foo  bar', width=8))),
       ['foo  bar'],
     )
 
     self.assertEqual(
-      list(wrap_into_paragraph('foo-bar', width=5)),
+      list(first_item(wrap_into_paragraph('foo-bar', width=5))),
       ['foo-', 'bar'],
     )
 
     self.assertEqual(
-      list(wrap_into_paragraph('foo barbarbar', width=6)),
+      list(first_item(wrap_into_paragraph('foo barbarbar', width=6))),
       ['foo', 'barbar', 'bar'],
     )
 
     self.assertEqual(
-      list(wrap_into_paragraph('foo barbarbar', max_trailing_whitespace=1, width=6)),
+      list(first_item(wrap_into_paragraph('foo barbarbar', max_trailing_whitespace=1, width=6))),
       ['foo ba', 'rbarba', 'r'],
+    )
+
+    self.assertEqual(
+      list(first_item(wrap_into_paragraph('foobar      ', width=6))),
+      ['foobar'],
+    )
+
+    self.assertEqual(
+      list(first_item(wrap_into_paragraph('foobar ', width=4))),
+      ['foob', 'ar'],
+    )
+
+    self.assertEqual(
+      list(first_item(wrap_into_paragraph('foo      bar', width=3))),
+      ['foo', 'bar'],
     )
 
 

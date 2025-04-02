@@ -24,19 +24,6 @@ def get_common_indentation(lines: list[str], /):
   return min(len(line) - len(stripped_line) for line in lines if (stripped_line := line.lstrip()))
 
 
-# Line number starts at 1
-# Column number starts at 0
-def ansi_link(text: str, url: str, *, column_number: Optional[int] = None, line_number: Optional[int] = None):
-  assert (column_number is None) or (line_number is not None)
-
-  full_url = (
-      url
-    + (f'#{line_number}' if line_number is not None else '')
-    + (f':{column_number + 1}' if column_number is not None else '')
-  )
-
-  return f'\033]8;;{full_url}\033\\{text}\033]8;;\033\\'
-
 @dataclass(slots=True)
 class Symbols:
   color_bold: str
@@ -109,6 +96,22 @@ class Symbols:
       self.underline_reset = ''
 
       self.link_enabled = True
+
+  # Line number starts at 1
+  # Column number starts at 0
+  def link(self, text: str, url: str, *, column_number: Optional[int] = None, line_number: Optional[int] = None):
+    assert (column_number is None) or (line_number is not None)
+
+    if not self.link_enabled:
+      return text
+
+    full_url = (
+        url
+      + (f'#{line_number}' if line_number is not None else '')
+      + (f':{column_number + 1}' if column_number is not None else '')
+    )
+
+    return f'\033]8;;{full_url}\033\\{text}\033]8;;\033\\'
 
   @classmethod
   def from_file(cls, file: IO[str], options: Options):
@@ -257,9 +260,9 @@ def render_item(
 
       if desc:
         for desc_line in desc_lines:
-          for wrapped_line in util.wrap_into_paragraph(desc_line, width=desc_exp_width):
+          for wrapped_line, wrapped_line_len in util.wrap_into_paragraph(desc_line, link=symbols.link, width=desc_exp_width):
             wrapped_line_prefixed = current_prefix + current_indent + desc_exp_add_indent + wrapped_line
-            yield wrapped_line_prefixed, len(wrapped_line_prefixed)
+            yield wrapped_line_prefixed, wrapped_line_len
 
         newline_required = True
 
@@ -295,10 +298,10 @@ def render_item(
         yield note_header, note_header_len
 
         for note_line in note_lines:
-          for wrapped_line in util.wrap_into_paragraph(note_line, width=(note_width - len(note_exp_add_indent))):
+          for wrapped_line, wrapped_line_len in util.wrap_into_paragraph(note_line, width=(note_width - len(note_exp_add_indent))):
             yield (
               note_prefix + note_exp_add_indent + wrapped_line,
-              len(note_prefix) + len(note_exp_add_indent) + len(wrapped_line),
+              len(note_prefix) + len(note_exp_add_indent) + wrapped_line_len,
             )
 
         newline_required = True
@@ -563,12 +566,12 @@ def render_frames(
 
             condensed_path, condensed_path_len = util.condense_parts(path_parts, ellipsis=symbols.ellipsis, separator='/', width=(most_available_width - frame_title_right_len))
 
-            frame_title_right = ansi_link(
+            frame_title_right = symbols.link(
               condensed_path,
               frame.module.path.as_uri(),
               column_number=(frame.area.col_start if frame.area is not None else None),
               line_number=(frame.area.line_start if frame.area is not None else None),
-            ) if symbols.link_enabled and options.target_links else condensed_path
+            ) if options.target_links else condensed_path
             frame_title_right_len += condensed_path_len
           elif frame.module.label is not None:
             string = util.wrap_into_ellipsis(frame.module.label, ellipsis=symbols.ellipsis, width=(most_available_width - frame_title_right_len))
