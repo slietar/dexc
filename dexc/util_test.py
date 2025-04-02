@@ -100,6 +100,11 @@ class TestUtil(unittest.TestCase):
     )
 
     self.assertEqual(
+      list(first_item(wrap_into_paragraph('foo_bar', width=5))),
+      ['foo_', 'bar'],
+    )
+
+    self.assertEqual(
       list(first_item(wrap_into_paragraph('foo barbarbar', width=6))),
       ['foo', 'barbar', 'bar'],
     )

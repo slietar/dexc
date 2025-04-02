@@ -214,9 +214,10 @@ def wrap_into_paragraph(
 
 
 BREAK_PATTERNS = [
-  re.compile(str_pattern) for str_pattern in [
+  re.compile(str_pattern, re.IGNORECASE) for str_pattern in [
     r'\s+()',
-    r'.\b()',
+    # Same as .\b() but with considering underscores as non-word characters
+    r'.(?:(?<=[a-z])(?=[^a-z])|(?<=[^a-z])(?=[a-z]))()',
     r'.()',
   ]
 ]

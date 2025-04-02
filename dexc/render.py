@@ -13,7 +13,7 @@ from .extract import (ExceptionChain, FrameAreaFull, FrameAreaLines,
                       FrameAreaStartLine, FrameAreaStartLineCol, FrameItem,
                       ModuleInfo)
 from .options import Options
-from .util import UnreachableError, wrap_into_ellipsis
+from .util import UnreachableError
 from .vendor import get_ipython
 
 
@@ -171,7 +171,7 @@ def render(
 ):
   file.write(prefix)
 
-  debug = False
+  debug = True
   newline_required = False
   symbols = _symbols if _symbols is not None else Symbols.from_file(file, options)
 
@@ -703,23 +703,28 @@ def render_frames(
             while (context_line_end > line_end) and (not (context_line := code_lines[context_line_end - 1]) or context_line.isspace()):
               context_line_end -= 1
 
+            final_line = line_end_cut if context_line_end == line_end else context_line_end
+
 
             # Compute line parameters
 
             # Also includes cut target lines
             displayed_lines = code_lines[(context_line_start - 1):context_line_end]
-            common_indentation = get_common_indentation(displayed_lines) if options.remove_common_indentation else 0
+            lines_common_indent = get_common_indentation(displayed_lines) if options.remove_common_indentation else 0
 
-            line_number_width = get_integer_width(context_line_end)
+
+            trace_prefix = frame_prefix + frame_indent + indent_str
+            trace_width = available_width - len(indent_str)
+
+            line_number_width = get_integer_width(final_line)
+            code_width = trace_width - line_number_width - 1 - lines_common_indent
 
 
             # Display context before target
 
-            trace_prefix = frame_prefix + frame_indent + indent_str
-
             for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
               line_number = context_line_start + rel_line_index
-              line_fmt = f'{line_number: >{line_number_width}} ' + line[common_indentation:]
+              line_fmt = f'{line_number: >{line_number_width}} ' + line[lines_common_indent:]
 
               yield (
                   trace_prefix
@@ -737,8 +742,10 @@ def render_frames(
             target_lines = code_lines[(line_start - 1):line_end_cut]
 
             for rel_line_index, line in enumerate(target_lines):
+              line_pretruncated = line[lines_common_indent:]
+
               line_number = line_start + rel_line_index
-              line_indent = util.lcount_whitespace(line) if options.skip_indentation_highlight else 0
+              line_indent = util.lcount_whitespace(line_pretruncated) # if options.skip_indentation_highlight else 0
 
               if line_number == line_start:
                 anchor_start = col_start
@@ -748,22 +755,16 @@ def render_frames(
                 else:
                   anchor_end = len(line)
               elif line_number == line_end:
-                anchor_start = line_indent
+                anchor_start = line_indent if options.skip_indentation_highlight else 0
                 anchor_end = col_end
               else:
-                anchor_start = line_indent
+                anchor_start = line_indent if options.skip_indentation_highlight else 0
                 anchor_end = len(line)
 
-              anchor_start_sub = max(anchor_start - common_indentation, 0)
-              anchor_end_sub = max(anchor_end - common_indentation, 0)
+              anchor_start_sub = max(anchor_start - lines_common_indent, 0)
+              anchor_end_sub = max(anchor_end - lines_common_indent, 0)
 
-              line_fmt = (
-                  trace_prefix
-                + f'{line_number: >{line_number_width}} '
-                + line[common_indentation:]
-              )
-
-              yield line_fmt, len(line_fmt)
+              line_truncated = line_pretruncated[line_indent:]
 
               match profile:
                 case 'default':
@@ -773,29 +774,56 @@ def render_frames(
                 case _:
                   raise UnreachableError
 
-              yield (
-                  trace_prefix
-                + ' ' * (line_number_width + 1 + anchor_start_sub)
-                + highlight_color
-                + '^' * (anchor_end_sub - anchor_start_sub)
-                + symbols.color_reset,
+              for wrapped_line_index, (wrapped_line_start, wrapped_line_end) in enumerate(util.wrap_into_paragraph_indices(line_truncated, width=(code_width - line_indent))):
+                wrapped_line_first = wrapped_line_index == 0
 
-                  len(trace_prefix)
-                + line_number_width
-                + 1
-                + anchor_end_sub,
-              )
+                yield (
+                    trace_prefix
+                  + (f'{line_number: >{line_number_width}} ' if wrapped_line_first else ' ' * (line_number_width + 1))
+                  + line_pretruncated[:line_indent]
+                  + line_truncated[wrapped_line_start:wrapped_line_end],
+
+                    len(trace_prefix)
+                  + line_number_width
+                  + 1
+                  + line_indent
+                  + (wrapped_line_end - wrapped_line_start),
+                )
+
+
+                if (anchor_start_sub < wrapped_line_end + line_indent) and (anchor_end_sub >= wrapped_line_start + line_indent):
+                  highlight_start = max(anchor_start_sub, wrapped_line_start + line_indent) - wrapped_line_start
+                  highlight_end = min(anchor_end_sub, wrapped_line_end + line_indent) - wrapped_line_start
+
+                  yield (
+                      trace_prefix
+                    + ' ' * (line_number_width + 1 + highlight_start)
+                    + highlight_color
+                    + '^' * (highlight_end - highlight_start)
+                    + symbols.color_reset,
+
+                      len(trace_prefix)
+                    + line_number_width
+                    + 1
+                    + highlight_end,
+                  )
+
+                  newline_required = not skip_newline_on_highlights_at_trace_ends
+                else:
+                  newline_required = True
 
             if line_end_cut != line_end:
               cut_message = f'{frame_indent}{indent_str}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]'
               yield cut_message, len(cut_message)
+
+              newline_required = True
 
 
             # Display context after target
 
             for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
               line_number = line_end + rel_line_index + 1
-              line_fmt = f'{line_number: >{line_number_width}} ' + line[common_indentation:]
+              line_fmt = f'{line_number: >{line_number_width}} ' + line[lines_common_indent:]
 
               yield (
                   trace_prefix
@@ -807,8 +835,7 @@ def render_frames(
                 + len(line_fmt),
               )
 
-            # The line of ^^^^ can be considered a newline
-            newline_required = (line_end != context_line_end) or (line_end_cut != line_end) or (not skip_newline_on_highlights_at_trace_ends)
+              newline_required = True
 
         case LibraryFrameAggregate(frames=agg_frames, package_name=name):
           assert atom.repeat_count == 1
@@ -833,7 +860,7 @@ def render_frames(
           frame_title = string
           frame_title_len += len(string)
 
-          string = wrap_into_ellipsis(
+          string = util.wrap_into_ellipsis(
             '.'.join(agg_name_segments) + ('.*' if not module_unique else ''),
             ellipsis=symbols.ellipsis,
             width=(most_available_width - frame_title_len),
