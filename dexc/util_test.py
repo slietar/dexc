@@ -54,6 +54,11 @@ class TestUtil(unittest.TestCase):
         'foob/',
      )
 
+     self.assertEqual(
+        wrap_into_ellipsis('foob ar', ellipsis='/', width=6),
+        'foob/',
+     )
+
   def test_wrap_into_paragraph(self):
     def first_item(tup: Iterable[tuple[str, int]]):
       for item, _ in tup:

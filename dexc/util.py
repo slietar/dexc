@@ -307,4 +307,4 @@ def wrap_into_ellipsis(target: str, /, *, ellipsis: str, margin: int = 0, width:
   if len(target) <= width - margin:
     return target
 
-  return target[:(width - len(ellipsis))] + ellipsis
+  return target[:(width - len(ellipsis))].rstrip() + ellipsis

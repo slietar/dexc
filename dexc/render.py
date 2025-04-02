@@ -717,23 +717,28 @@ def render_frames(
             trace_width = available_width - len(indent_str)
 
             line_number_width = get_integer_width(final_line)
-            code_width = trace_width - line_number_width - 1 - lines_common_indent
+            line_number_sep = ' '
+            code_width = trace_width - line_number_width - len(line_number_sep)
 
 
             # Display context before target
 
             for rel_line_index, line in enumerate(code_lines[(context_line_start - 1):(line_start - 1)]):
               line_number = context_line_start + rel_line_index
-              line_fmt = f'{line_number: >{line_number_width}} ' + line[lines_common_indent:]
+              line_truncated = util.wrap_into_ellipsis(line[lines_common_indent:], ellipsis=symbols.ellipsis, width=code_width)
 
               yield (
                   trace_prefix
                 + symbols.color_bright_black
-                + line_fmt
+                + f'{line_number: >{line_number_width}}'
+                + line_number_sep
+                + line_truncated
                 + symbols.color_reset,
 
                   len(trace_prefix)
-                + len(line_fmt),
+                + line_number_width
+                + len(line_number_sep)
+                + len(line_truncated),
               )
 
 
@@ -745,7 +750,8 @@ def render_frames(
               line_pretruncated = line[lines_common_indent:]
 
               line_number = line_start + rel_line_index
-              line_indent = util.lcount_whitespace(line_pretruncated) # if options.skip_indentation_highlight else 0
+              line_indent = util.lcount_whitespace(line_pretruncated)
+              line_indent_skippable = line_indent if options.skip_indentation_highlight else 0
 
               if line_number == line_start:
                 anchor_start = col_start
@@ -755,10 +761,10 @@ def render_frames(
                 else:
                   anchor_end = len(line)
               elif line_number == line_end:
-                anchor_start = line_indent if options.skip_indentation_highlight else 0
+                anchor_start = line_indent_skippable
                 anchor_end = col_end
               else:
-                anchor_start = line_indent if options.skip_indentation_highlight else 0
+                anchor_start = line_indent_skippable
                 anchor_end = len(line)
 
               anchor_start_sub = max(anchor_start - lines_common_indent, 0)
@@ -779,32 +785,36 @@ def render_frames(
 
                 yield (
                     trace_prefix
-                  + (f'{line_number: >{line_number_width}} ' if wrapped_line_first else ' ' * (line_number_width + 1))
+                  + (f'{line_number: >{line_number_width}}' if wrapped_line_first else ' ' * line_number_width)
+                  + line_number_sep
                   + line_pretruncated[:line_indent]
                   + line_truncated[wrapped_line_start:wrapped_line_end],
 
                     len(trace_prefix)
                   + line_number_width
-                  + 1
+                  + len(line_number_sep)
                   + line_indent
                   + (wrapped_line_end - wrapped_line_start),
                 )
 
+                line_indent_skipped = line_indent_skippable if wrapped_line_first else line_indent
 
-                if (anchor_start_sub < wrapped_line_end + line_indent) and (anchor_end_sub >= wrapped_line_start + line_indent):
-                  highlight_start = max(anchor_start_sub, wrapped_line_start + line_indent) - wrapped_line_start
+                if (anchor_start_sub < wrapped_line_end + line_indent) and (anchor_end_sub >= wrapped_line_start + line_indent_skipped):
+                  highlight_start = max(anchor_start_sub, wrapped_line_start + line_indent_skipped) - wrapped_line_start
                   highlight_end = min(anchor_end_sub, wrapped_line_end + line_indent) - wrapped_line_start
 
                   yield (
                       trace_prefix
-                    + ' ' * (line_number_width + 1 + highlight_start)
+                    + ' ' * line_number_width
+                    + line_number_sep
+                    + ' ' * highlight_start
                     + highlight_color
                     + '^' * (highlight_end - highlight_start)
                     + symbols.color_reset,
 
                       len(trace_prefix)
                     + line_number_width
-                    + 1
+                    + len(line_number_sep)
                     + highlight_end,
                   )
 
@@ -823,16 +833,20 @@ def render_frames(
 
             for rel_line_index, line in enumerate(code_lines[line_end:context_line_end]):
               line_number = line_end + rel_line_index + 1
-              line_fmt = f'{line_number: >{line_number_width}} ' + line[lines_common_indent:]
+              line_truncated = util.wrap_into_ellipsis(line[lines_common_indent:], ellipsis=symbols.ellipsis, width=code_width)
 
               yield (
                   trace_prefix
                 + symbols.color_bright_black
-                + line_fmt
+                + f'{line_number: >{line_number_width}}'
+                + line_number_sep
+                + line_truncated
                 + symbols.color_reset,
 
                   len(trace_prefix)
-                + len(line_fmt),
+                + line_number_width
+                + len(line_number_sep)
+                + len(line_truncated),
               )
 
               newline_required = True
