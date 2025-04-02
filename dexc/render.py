@@ -172,6 +172,7 @@ def render(
   file.write(prefix)
 
   debug = False
+  newline_required = False
   symbols = _symbols if _symbols is not None else Symbols.from_file(file, options)
 
   for line_index, (line, line_len) in enumerate(render_item(
@@ -183,6 +184,14 @@ def render(
     width=width,
     width_first=width,
   )):
+    if newline_required:
+      file.write(prefix + ' ' * width + suffix + '\n')
+      newline_required = False
+
+    if not line:
+      newline_required = True
+      continue
+
     if line_index > 0:
       file.write(prefix)
 
@@ -261,8 +270,17 @@ def render_item(
       if desc:
         for desc_line in desc_lines:
           for wrapped_line, wrapped_line_len in util.wrap_into_paragraph(desc_line, link=symbols.link, width=desc_exp_width):
-            wrapped_line_prefixed = current_prefix + current_indent + desc_exp_add_indent + wrapped_line
-            yield wrapped_line_prefixed, wrapped_line_len
+            yield (
+                current_prefix
+              + current_indent
+              + desc_exp_add_indent
+              + wrapped_line,
+
+                len(current_prefix)
+              + len(current_indent)
+              + len(desc_exp_add_indent)
+              + wrapped_line_len,
+            )
 
         newline_required = True
 
@@ -334,7 +352,8 @@ def render_item(
           if isinstance(agg_frame, FrameItem) and agg_frame.important and agg_frame.traceable and (len(trace_indices) < options.max_traces):
             trace_indices.add((atom_display_index, agg_frame_index))
 
-      frame_indent = current_indent + ('  ' if not floating else '')
+      frame_add_indent = '  ' if not floating else ''
+      frame_indent = current_indent + frame_add_indent
 
       for frame_line, frame_line_len in render_frames(
         atoms,
@@ -343,7 +362,7 @@ def render_item(
         profile=profile,
         symbols=symbols,
         trace_indices=trace_indices,
-        width=(current_width - len(frame_indent)),
+        width=(current_width - len(frame_add_indent)),
       ):
         if newline_required:
           yield current_prefix, len(current_prefix)

@@ -256,17 +256,12 @@ def wrap_into_paragraph_format_links(text: str, line_indices: Iterable[tuple[int
   current_match_started = False
 
   for line_start, line_end in line_indices:
-    # print()
-    # print('line', text[line_start:line_end])
-
     current_index = line_start
 
     formatted_line = ''
     formatted_line_len = 0
 
     while True:
-      # print(current_match_index, current_match_started)
-
       if current_match_index >= len(matches):
         formatted_line += text[current_index:line_end]
         formatted_line_len += line_end - current_index
@@ -302,18 +297,7 @@ def wrap_into_paragraph_format_links(text: str, line_indices: Iterable[tuple[int
 
         current_match_started = True
 
-    # print('finally', current_match_index, current_match_started)
-
     yield formatted_line, formatted_line_len
-
-  # print()
-  # print()
-
-# print(list(wrap_into_paragraph('foo https://google.com bar', width=10)))
-# print(list(wrap_into_paragraph_with_links('foo https://google.com', width=10)))
-# print(list(wrap_into_paragraph('foo https://google.com xp http://foo.com             ', link=(lambda x, _: f'[{x}]'), width=10)))
-
-# print(list(wrap_into_paragraph('  Lorem ipsum dolor sit amet, consectetur adipisci elit.', width=12)))
 
 
 def wrap_into_ellipsis(target: str, /, *, ellipsis: str, margin: int = 0, width: int):
