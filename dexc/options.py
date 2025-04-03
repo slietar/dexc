@@ -16,6 +16,7 @@ class Options:
   colorize: Optional[bool] = None
   compression_first_on_top: bool = False
   display_internal_frames: bool = False
+  generic_indent: int = 2
   include_module_name_in_frames: bool = False
   inner_frame_on_top: bool = False
   max_context_lines_after: int = 2
@@ -46,6 +47,7 @@ class OptionsDict(TypedDict):
   colorize: Optional[bool]
   compression_first_on_top: bool
   display_internal_frames: bool
+  generic_indent: int
   include_module_name_in_frames: bool
   inner_frame_on_top: bool
   max_context_lines_after: int

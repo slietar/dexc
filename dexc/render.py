@@ -95,7 +95,7 @@ class Symbols:
       self.underline = ''
       self.underline_reset = ''
 
-      self.link_enabled = True
+      self.link_enabled = False
 
   # Line number starts at 1
   # Column number starts at 0
@@ -185,7 +185,13 @@ def render(
     width_first=width,
   )):
     if newline_required:
-      file.write(prefix + ' ' * width + suffix + '\n')
+      file.write(prefix)
+
+      if debug or suffix:
+        file.write(symbols.color_bright_black + ('·' if debug else ' ') * width + symbols.color_reset)
+        file.write(suffix)
+
+      file.write('\n')
       newline_required = False
 
     if not line:
@@ -196,8 +202,11 @@ def render(
       file.write(prefix)
 
     file.write(line)
-    file.write(symbols.color_bright_black + ('·' if debug else ' ') * (width - line_len) + symbols.color_reset)
-    file.write(suffix)
+
+    if debug or suffix:
+      file.write(symbols.color_bright_black + ('·' if debug else ' ') * (width - line_len) + symbols.color_reset)
+      file.write(suffix)
+
     file.write('\n')
 
 
@@ -211,6 +220,7 @@ def render_item(
   width: int,
   width_first: int,
 ) -> Generator[tuple[str, int]]:
+  generic_indent_str = options.generic_indent * ' '
   newline_required = False
 
   for item, relation in (
@@ -243,7 +253,16 @@ def render_item(
 
     # Description
 
-    current_prefix, current_indent = (symbols.box_vertical, ' ') if item.children else ('', '')
+    if item.children:
+      current_prefix = symbols.box_vertical
+      current_indent = ' ' * max(options.generic_indent - 2, 1)
+    elif not floating:
+      current_prefix = ''
+      current_indent = generic_indent_str
+    else:
+      current_prefix = ''
+      current_indent = ''
+
     current_width = width - len(current_prefix) - len(current_indent)
 
     desc = str(item.instance)
@@ -259,7 +278,7 @@ def render_item(
         len(exc_type_name) + len(exc_type_sep) + len(desc),
       )
     else:
-      desc_exp_add_indent = '  ' if not item.children else ''
+      desc_exp_add_indent = generic_indent_str if (not item.children) and floating else ''
       desc_exp_width = current_width - len(desc_exp_add_indent)
 
       yield (
@@ -288,11 +307,10 @@ def render_item(
     # Notes
 
     notes = getattr(item.instance, '__notes__', [])
-    note_add_indent = '  ' if not floating else ''
-    note_width = current_width - len(note_add_indent)
+    note_width = current_width
 
     note_header_str = 'note'
-    note_prefix = current_prefix + current_indent + note_add_indent
+    note_prefix = current_prefix + current_indent
 
     for note in notes:
       note_lines = note.splitlines()
@@ -311,7 +329,7 @@ def render_item(
 
         newline_required = False
       else:
-        note_exp_add_indent = '  '
+        note_exp_add_indent = generic_indent_str
 
         yield note_header, note_header_len
 
@@ -352,8 +370,7 @@ def render_item(
           if isinstance(agg_frame, FrameItem) and agg_frame.important and agg_frame.traceable and (len(trace_indices) < options.max_traces):
             trace_indices.add((atom_display_index, agg_frame_index))
 
-      frame_add_indent = '  ' if not floating else ''
-      frame_indent = current_indent + frame_add_indent
+      frame_indent = current_indent
 
       for frame_line, frame_line_len in render_frames(
         atoms,
@@ -362,7 +379,7 @@ def render_item(
         profile=profile,
         symbols=symbols,
         trace_indices=trace_indices,
-        width=(current_width - len(frame_add_indent)),
+        width=current_width,
       ):
         if newline_required:
           yield current_prefix, len(current_prefix)
@@ -437,7 +454,7 @@ def render_frames(
   width: int, # Excluding indent
 ) -> Generator[tuple[str, int]]: # Both including indent
   # Additional options
-  indent_str = '  '
+  generic_indent_str = options.generic_indent * ' '
   inset_repeat_box = True
   skip_newline_on_highlights_at_trace_ends = True
 
@@ -458,7 +475,7 @@ def render_frames(
       newline_required = False
 
     if repeat_box:
-      if inset_repeat_box and (indent[-2:] == indent_str):
+      if inset_repeat_box and (indent[-2:] == generic_indent_str):
         repeat_box_indent = indent[:-2]
       else:
         repeat_box_indent = indent
@@ -725,8 +742,8 @@ def render_frames(
             lines_common_indent = get_common_indentation(displayed_lines) if options.remove_common_indentation else 0
 
 
-            trace_prefix = frame_prefix + frame_indent + indent_str
-            trace_width = available_width - len(indent_str)
+            trace_prefix = frame_prefix + frame_indent + generic_indent_str
+            trace_width = available_width - len(generic_indent_str)
 
             line_number_width = get_integer_width(final_line)
             line_number_sep = ' '
@@ -835,7 +852,7 @@ def render_frames(
                   newline_required = True
 
             if line_end_cut != line_end:
-              cut_message = f'{frame_indent}{indent_str}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]'
+              cut_message = f'{frame_indent}{generic_indent_str}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]'
               yield cut_message, len(cut_message)
 
               newline_required = True
