@@ -20,7 +20,7 @@ class Ancestor:
 @dataclass(frozen=True, slots=True)
 class AstTarget:
   node: AstNode
-  parents: list[AstNode] = field(hash=False)
+  parents: list[AstNode] = field(hash=False) # Includes node
 
   def ancestors(self) -> Iterable[Ancestor]:
     prev_class = False
@@ -91,6 +91,7 @@ class FrameItem:
   hidden: bool
   module: ModuleInfo
   target: Optional[AstTarget]
+  target_is_module: bool # Indicates whether the target is the module's root (should not be used unless target is None)
   target_name: Optional[str]
   reraise: bool
 
@@ -175,6 +176,7 @@ def extract_exc_frames(exc: BaseException, /):
       module=module_info,
       reraise=False,
       target=None,
+      target_is_module=False,
       target_name=None,
     )
 
@@ -222,12 +224,20 @@ def extract_tb_frames(start_tb: TracebackType, /):
       else bool(frame.f_globals.get('__tracebackhide__'))
     )
 
+    if frame.f_code.co_name == '<module>':
+      target_is_module = True
+      target_name = None
+    else:
+      target_is_module = False
+      target_name = frame.f_code.co_name
+
     frame = FrameItem(
       area=area,
       hidden=hidden,
       module=module_info,
       target=target,
-      target_name=frame.f_code.co_name,
+      target_is_module=target_is_module,
+      target_name=target_name,
       reraise=((tb_index > 0) and (target is not None) and isinstance(target.node, ast.Raise)),
     )
 

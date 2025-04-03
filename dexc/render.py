@@ -171,7 +171,7 @@ def render(
 ):
   file.write(prefix)
 
-  debug = True
+  debug = False
   newline_required = False
   symbols = _symbols if _symbols is not None else Symbols.from_file(file, options)
 
@@ -503,68 +503,80 @@ def render_frames(
 
           frame_title_left_len += len(title_left_suffix)
 
+
+          emphasize_last = False
+          target_path = list[str]()
+
+          if options.include_module_name_in_frames and (frame.module.name_segments is not None):
+            target_path.append('.'.join(frame.module.name_segments))
+
           if frame.target is not None:
             ancestor_names = [ancestor.name for ancestor in frame.target.ancestors()]
+            target_path += ancestor_names
 
             if ancestor_names:
-              separator = f' {symbols.chevron_right} '
-              ancestor_name_lens = [len(name) for name in ancestor_names]
+              emphasize_last = True
+          elif frame.target_name is not None:
+            target_path.append(frame.target_name)
+            emphasize_last = True
 
-              condense_left_index, condense_right_index = util.condense_seq(
-                ancestor_name_lens,
+          if target_path:
+            separator = f' {symbols.chevron_right} '
+            target_path_lens = [len(segment) for segment in target_path]
+
+            condense_left_index, condense_right_index = util.condense_seq(
+              target_path_lens,
+              ellipsis_width=len(symbols.ellipsis),
+              priority_left=False,
+              separator_width=len(separator),
+              width=(most_available_width - frame_title_left_len),
+            )
+
+            if (condense_left_index < len(target_path)) and (condense_right_index >= len(target_path)):
+              ancestors_ellipsis = symbols.ellipsis + separator if len(target_path) > 1 else ''
+              wrapped_target_name = util.wrap_into_ellipsis(target_path[-1], ellipsis=symbols.ellipsis, width=(most_available_width - frame_title_left_len))
+
+              frame_title_left += ancestors_ellipsis
+
+              if emphasize_last:
+                frame_title_left += symbols.underline
+
+              frame_title_left += wrapped_target_name
+
+              if emphasize_last:
+                frame_title_left += symbols.underline_reset
+
+              frame_title_left_len += len(ancestors_ellipsis) + len(wrapped_target_name)
+            else:
+              string, string_len = util.format_condensed_seq(
+                [
+                  (symbols.underline + name + symbols.underline_reset) if (name_index == len(target_path) - 1) and emphasize_last else name
+                  for name_index, name in enumerate(target_path)
+                ],
+                target_path_lens,
+                (condense_left_index, condense_right_index),
+                ellipsis=symbols.ellipsis,
                 ellipsis_width=len(symbols.ellipsis),
-                priority_left=False,
+                separator=separator,
                 separator_width=len(separator),
-                width=(most_available_width - frame_title_left_len),
               )
 
-              if (condense_left_index < len(ancestor_names)) and (condense_right_index >= len(ancestor_names)):
-                ancestors_ellipsis = symbols.ellipsis + separator if len(ancestor_names) > 1 else ''
-                wrapped_target_name = util.wrap_into_ellipsis(ancestor_names[-1], ellipsis=symbols.ellipsis, width=(most_available_width - frame_title_left_len))
-
-                frame_title_left += ancestors_ellipsis + symbols.underline + wrapped_target_name + symbols.underline_reset
-                frame_title_left_len += len(ancestors_ellipsis) + len(wrapped_target_name)
-              else:
-                string, string_len = util.format_condensed_seq(
-                  [
-                    symbols.underline + name + symbols.underline_reset if name_index == len(ancestor_names) - 1 else name
-                    for name_index, name in enumerate(ancestor_names)
-                  ],
-                  ancestor_name_lens,
-                  (condense_left_index, condense_right_index),
-                  ellipsis=symbols.ellipsis,
-                  ellipsis_width=len(symbols.ellipsis),
-                  separator=separator,
-                  separator_width=len(separator),
-                )
-
-                frame_title_left += string
-                frame_title_left_len += string_len
-            else:
-              string = 'module'
               frame_title_left += string
-              frame_title_left_len += len(string)
+              frame_title_left_len += string_len
+
+          elif frame.target_is_module:
+            string = 'module'
+            frame_title_left += string
+            frame_title_left_len += len(string)
           else:
-            if frame.target_name is not None:
-              string = util.wrap_into_ellipsis(frame.target_name, ellipsis=symbols.ellipsis, width=(most_available_width - frame_title_left_len))
-              frame_title_left += symbols.underline + string + symbols.underline_reset
-              frame_title_left_len += len(string)
-            else:
-              string = 'unknown location'
-              frame_title_left += string
-              frame_title_left_len += len(string)
+            string = 'unknown'
+            frame_title_left += string
+            frame_title_left_len += len(string)
 
           frame_title_left += title_left_suffix
 
 
           # Frame right title
-
-          # if frame.module.name_segments is not None:
-          #   frame_title_details += f'in {'.'.join(frame.module.name_segments)}'
-          # elif frame.module.label is not None:
-          #   frame_title_details += f'in {frame.module.label}'
-          # else:
-          #   frame_title_details += 'in unknown module'
 
           if frame.area is not None:
             line_start_fmt = f':{frame.area.line_start}'
