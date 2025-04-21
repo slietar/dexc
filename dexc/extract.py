@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from types import NoneType, TracebackType
 from typing import Iterable, Literal, Optional
 
-from .inspector import ModuleInfo, ModuleInspector
+from .inspector import ModuleInfo, ModuleInspector, PartialSource
 
 
 type AncestorKind = Literal['class', 'function', 'method']
@@ -63,8 +63,6 @@ class FrameAreaFull(FrameArea):
   line_end: int
   col_start: int
   col_end: int
-
-# type FrameArea = FrameAreaFull | FrameAreaLines | FrameAreaStartLine | FrameAreaStartLineCol
 
 def create_frame_area(
   line_start: Optional[int],
@@ -158,13 +156,22 @@ def extract_exc_frames(exc: BaseException, /):
 
   # Detect syntax error
   if isinstance(exc, SyntaxError) and (exc.filename is not None):
-    module_info = ModuleInspector().inspect(exc.filename)
+    module_info = ModuleInspector().inspect(exc.filename, partial_source=(
+      PartialSource(
+        contents=exc.text,
+        start_line=exc.lineno,
+      )
+    ) if (
+      (exc.text is not None) and
+      (exc.lineno is not None)
+    ) else None)
+
     area = create_frame_area(
       line_start=exc.lineno,
       line_end=exc.end_lineno,
       col_start=(exc.offset - 1 if exc.offset is not None else None),
       col_end=(
-        (exc.end_offset - 1 if (exc.end_offset > 0) else exc.offset)
+        (exc.end_offset if (exc.end_offset > 0) else exc.offset)
         if exc.end_offset is not None
         else None
       ),

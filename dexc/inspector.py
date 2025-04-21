@@ -11,6 +11,12 @@ from .util import get_relative_path
 from .vendor import get_ipython
 
 
+@dataclass(slots=True)
+class PartialSource:
+  contents: str
+  start_line: int
+
+
 type ModuleKind = Literal['internal', 'std', 'lib', 'user']
 
 @dataclass(eq=True, frozen=True, slots=True)
@@ -29,7 +35,7 @@ class ModuleInfo:
 class ModuleInspector:
   cache: dict[Path, ModuleInfo] = field(default_factory=dict)
 
-  def inspect(self, filename: str, frame: Optional[FrameType] = None):
+  def inspect(self, filename: str, frame: Optional[FrameType] = None, partial_source: Optional[PartialSource] = None):
     instance = inspect.getmodule(frame.f_code) if frame is not None else None
     filename_special = filename.startswith('<') and filename.endswith('>')
 
@@ -86,8 +92,6 @@ class ModuleInspector:
       else:
         source = None
 
-    # print(path, path.exists() if path is not None else None, type(source), len(linecache.getlines(str(path))))
-
 
     # Parse source
 
@@ -99,6 +103,11 @@ class ModuleInspector:
     else:
       tree = None
 
+
+    # Try a partial source
+
+    if (source is None) and (partial_source is not None):
+      source = '\n' * (partial_source.start_line - 1) + partial_source.contents
 
     # Find label
 

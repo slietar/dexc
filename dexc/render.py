@@ -270,7 +270,11 @@ def render_item(
 
     current_width = width - len(current_prefix) - len(current_indent)
 
-    desc = str(item.instance)
+    if isinstance(item.instance, SyntaxError):
+      desc = item.instance.args[0]
+    else:
+      desc = str(item.instance)
+
     desc_lines = desc.splitlines() if desc else []
 
     exc_type_name = util.wrap_into_ellipsis(type(item.instance).__name__, ellipsis=symbols.ellipsis, width=width)
@@ -607,7 +611,7 @@ def render_frames(
             frame_title_left += string
             frame_title_left_len += len(string)
           else:
-            string = 'unknown'
+            string = 'file'
             frame_title_left += string
             frame_title_left_len += len(string)
 
