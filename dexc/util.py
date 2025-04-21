@@ -86,7 +86,7 @@ def format_condensed_seq(
 ):
   left_index, right_index = indices
   output = separator.join(parts[:left_index])
-  total_len = sum(part_lens[:left_index]) + left_index * separator_width
+  total_len = sum(part_lens[:left_index]) + max(left_index - 1, 0) * separator_width
 
   if (left_index > 0) and (
     (right_index < len(parts)) or
@@ -104,7 +104,7 @@ def format_condensed_seq(
       total_len += separator_width
 
   output += separator.join(parts[right_index:])
-  total_len += sum(part_lens[right_index:]) + (len(parts) - right_index - 1) * separator_width
+  total_len += sum(part_lens[right_index:]) + max(len(parts) - right_index - 1, 0) * separator_width
 
   return output, total_len
 

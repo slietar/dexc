@@ -49,7 +49,7 @@ class Options:
     else:
       width, _ = shutil.get_terminal_size((self.max_width, 24))
 
-    return min(width, self.max_width)
+    return max(min(width, self.max_width), 40)
 
 class OptionsDict(TypedDict):
   aggregate_nonuser_frames: bool
@@ -65,6 +65,8 @@ class OptionsDict(TypedDict):
   max_context_lines_before: int
   max_target_lines: int
   max_traces: int
-  skip_indentation_highlight: bool
+  max_width: int
   remove_common_indentation: bool
-  target_links: bool
+  render_links: Optional[bool]
+  skip_indentation_highlight: bool
+  width: Optional[int]

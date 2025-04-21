@@ -639,7 +639,12 @@ def render_frames(
 
             path_parts += frame.module.relative_path.parts
 
-            condensed_path, condensed_path_len = util.condense_parts(path_parts, ellipsis=symbols.ellipsis, separator='/', width=(most_available_width - frame_title_right_len))
+            condensed_path, condensed_path_len = util.condense_parts(
+              path_parts,
+              ellipsis=symbols.ellipsis,
+              separator='/',
+              width=(most_available_width - frame_title_right_len),
+            )
 
             frame_title_right = symbols.link(
               condensed_path,
@@ -647,6 +652,7 @@ def render_frames(
               column_number=(frame.area.col_start if frame.area is not None else None),
               line_number=(frame.area.line_start if frame.area is not None else None),
             )
+
             frame_title_right_len += condensed_path_len
           elif frame.module.label is not None:
             string = util.wrap_into_ellipsis(frame.module.label, ellipsis=symbols.ellipsis, width=(most_available_width - frame_title_right_len))
