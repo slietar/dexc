@@ -23,13 +23,40 @@ def hook(message: str, category: type[Warning], filename: str, lineno: int, file
   file_ = file if file is not None else sys.stderr
   symbols = Symbols.from_file(file_, options)
 
-  # file_.write(f'{symbols.color_orange}┏━━━━ Warning ━━━━━━━{symbols.color_reset}\n')
-  # render(chain, file_, options, prefix=f'{symbols.color_orange}┃{symbols.color_reset} ', profile='warning')
-  # file_.write(f'{symbols.color_orange}┗━━━━━━━━━━━━━━━━━━━━{symbols.color_reset}\n')
+  width = 80
+  warn_message = ' Warning '
+  warn_message_shift = 4
 
-  file_.write(f'{symbols.color_orange}{symbols.box_down_right}{symbols.box_horizontal * 4} Warning {symbols.box_horizontal * 16}{symbols.color_reset}\n')
-  render(chain, file_, options, prefix=f'{symbols.color_orange}{symbols.box_vertical}{symbols.color_reset} ', profile='warning')
-  file_.write(f'{symbols.color_orange}{symbols.box_up_right}{symbols.box_horizontal * 29}{symbols.color_reset}\n')
+  file_.write(
+      symbols.color_orange
+    + symbols.box_down_right
+    + symbols.box_horizontal * warn_message_shift
+    + warn_message
+    + symbols.box_horizontal * (width - len(warn_message) - warn_message_shift - 2)
+    + symbols.box_down_left
+    + symbols.color_reset
+    + '\n'
+  )
+
+  render(
+    chain,
+    file_,
+    options,
+    prefix=f'{symbols.color_orange}{symbols.box_vertical}{symbols.color_reset} ',
+    profile='warning',
+    suffix=(' ' + symbols.color_orange + symbols.box_vertical + symbols.color_reset),
+    width=(width - 4),
+    _symbols=symbols
+  )
+
+  file_.write(
+      symbols.color_orange
+    + symbols.box_up_right
+    + symbols.box_horizontal * (width - 2)
+    + symbols.box_up_left
+    + symbols.color_reset
+    + '\n'
+  )
 
 
 def install_warnings():
