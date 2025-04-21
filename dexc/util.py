@@ -1,3 +1,4 @@
+import math
 import re
 import sys
 from pathlib import Path
@@ -175,11 +176,24 @@ def reversed_if[T](it: Reversible[T], condition: bool, /) -> Iterable[T]:
     return it
 
 
+def lcount_lines_until_nonempty(lines: Sequence[str], /, *, start: int = 0):
+  return start + next((index for index, line in enumerate(lines[start:]) if line), len(lines) - start)
+
 def lcount_whitespace(text: str, chars: Optional[str] = None, /):
   return len(text) - len(text.lstrip(chars))
 
 def rcount_whitespace(text: str, chars: Optional[str] = None, /):
   return len(text) - len(text.rstrip(chars))
+
+
+def get_common_indentation(lines: list[str], /):
+  return min(
+    line_indent for line in lines if (line_indent := lcount_whitespace(line)) < len(line)
+  )
+
+def get_integer_width(x: int, /):
+  return max(math.ceil(math.log10(x + 1)), 1)
+
 
 
 def wrap_into_paragraph(

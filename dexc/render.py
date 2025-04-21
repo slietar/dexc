@@ -1,4 +1,3 @@
-import math
 import os
 import sys
 from dataclasses import dataclass, field
@@ -15,13 +14,6 @@ from .extract import (ExceptionChain, FrameAreaFull, FrameAreaLines,
 from .options import Options
 from .util import UnreachableError
 from .vendor import get_ipython
-
-
-def get_integer_width(x: int, /):
-  return max(math.ceil(math.log10(x + 1)), 1)
-
-def get_common_indentation(lines: list[str], /):
-  return min(len(line) - len(stripped_line) for line in lines if (stripped_line := line.lstrip()))
 
 
 @dataclass(slots=True)
@@ -266,40 +258,43 @@ def render_item(
     current_width = width - len(current_prefix) - len(current_indent)
 
     desc = str(item.instance)
-    desc_lines = desc.splitlines()
+    desc_lines = desc.splitlines() if desc else []
 
     exc_type_name = util.wrap_into_ellipsis(type(item.instance).__name__, ellipsis=symbols.ellipsis, width=width)
     exc_type_sep = ': '
 
-    # Non-empty descriptions with a single, short line
-    if desc and (len(desc_lines) == 1) and (len(desc) <= width_first - len(exc_type_name) - len(exc_type_sep)):
+    if desc_lines and (len(desc_lines[0]) <= width_first - len(exc_type_name) - len(exc_type_sep)):
       yield (
-        symbols.color_bold + exc_type_name + exc_type_sep + symbols.color_reset + desc,
-        len(exc_type_name) + len(exc_type_sep) + len(desc),
+        symbols.color_bold + exc_type_name + exc_type_sep + symbols.color_reset + desc_lines[0],
+        len(exc_type_name) + len(exc_type_sep) + len(desc_lines[0]),
       )
-    else:
-      desc_exp_add_indent = generic_indent_str if (not item.children) and floating else ''
-      desc_exp_width = current_width - len(desc_exp_add_indent)
 
+      body_lines = desc_lines[util.lcount_lines_until_nonempty(desc_lines, start=1):]
+    else:
       yield (
         symbols.color_bold + exc_type_name + symbols.color_reset,
         len(exc_type_name),
       )
 
-      if desc:
-        for desc_line in desc_lines:
-          for wrapped_line, wrapped_line_len in util.wrap_into_paragraph(desc_line, link=symbols.link, width=desc_exp_width):
-            yield (
-                current_prefix
-              + current_indent
-              + desc_exp_add_indent
-              + wrapped_line,
+      body_lines = desc_lines
 
-                len(current_prefix)
-              + len(current_indent)
-              + len(desc_exp_add_indent)
-              + wrapped_line_len,
-            )
+    if body_lines:
+      desc_exp_add_indent = generic_indent_str if (not item.children) and floating else ''
+      desc_exp_width = current_width - len(desc_exp_add_indent)
+
+      for body_line in body_lines:
+        for wrapped_line, wrapped_line_len in util.wrap_into_paragraph(body_line, link=symbols.link, width=desc_exp_width):
+          yield (
+              current_prefix
+            + current_indent
+            + desc_exp_add_indent
+            + wrapped_line,
+
+              len(current_prefix)
+            + len(current_indent)
+            + len(desc_exp_add_indent)
+            + wrapped_line_len,
+          )
 
         newline_required = True
 
@@ -316,14 +311,14 @@ def render_item(
       note_lines = note.splitlines()
 
       # Remove empty lines
-      note_line_start_index = next((note_line_index for note_line_index, note_line in enumerate(note_lines) if note_line), len(note_lines))
+      note_line_start_index = util.lcount_lines_until_nonempty(note_lines)
 
       # Remove separator e.g. used by Jax
       if note_lines[note_line_start_index] == '-' * len(note_lines[note_line_start_index]):
         note_line_start_index += 1
 
       # Remove empty lines
-      note_line_start_index += next((note_line_index for note_line_index, note_line in enumerate(note_lines[note_line_start_index:]) if note_line), len(note_lines))
+      note_line_start_index = util.lcount_lines_until_nonempty(note_lines, start=note_line_start_index)
 
       note_lines_trunc = note_lines[note_line_start_index:]
       # note_lines_trunc = note_lines
@@ -752,13 +747,13 @@ def render_frames(
 
             # Also includes cut target lines
             displayed_lines = code_lines[(context_line_start - 1):context_line_end]
-            lines_common_indent = get_common_indentation(displayed_lines) if options.remove_common_indentation else 0
+            lines_common_indent = util.get_common_indentation(displayed_lines) if options.remove_common_indentation else 0
 
 
             trace_prefix = frame_prefix + frame_indent + generic_indent_str
             trace_width = available_width - len(generic_indent_str)
 
-            line_number_width = get_integer_width(final_line)
+            line_number_width = util.get_integer_width(final_line)
             line_number_sep = ' '
             code_width = trace_width - line_number_width - len(line_number_sep)
 
