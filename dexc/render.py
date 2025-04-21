@@ -306,7 +306,7 @@ def render_item(
 
     # Notes
 
-    notes = getattr(item.instance, '__notes__', [])
+    notes: list[str] = getattr(item.instance, '__notes__', [])
     note_width = current_width
 
     note_header_str = 'note'
@@ -315,16 +315,29 @@ def render_item(
     for note in notes:
       note_lines = note.splitlines()
 
+      # Remove empty lines
+      note_line_start_index = next((note_line_index for note_line_index, note_line in enumerate(note_lines) if note_line), len(note_lines))
+
+      # Remove separator e.g. used by Jax
+      if note_lines[note_line_start_index] == '-' * len(note_lines[note_line_start_index]):
+        note_line_start_index += 1
+
+      # Remove empty lines
+      note_line_start_index += next((note_line_index for note_line_index, note_line in enumerate(note_lines[note_line_start_index:]) if note_line), len(note_lines))
+
+      note_lines_trunc = note_lines[note_line_start_index:]
+      # note_lines_trunc = note_lines
+
       if newline_required:
         yield current_prefix, len(current_prefix)
 
       note_header = note_prefix + symbols.color_bold + note_header_str + symbols.color_reset
       note_header_len = len(note_prefix) + len(note_header_str)
 
-      if (len(note_lines) == 1) and (len(note) <= note_width):
+      if (len(note_lines_trunc) == 1) and (len(note_lines_trunc[0]) <= note_width):
         yield (
-          f'{note_header} {note}',
-          note_header_len + 1 + len(note),
+          f'{note_header} {note_lines_trunc[0]}',
+          note_header_len + 1 + len(note_lines_trunc[0]),
         )
 
         newline_required = False
@@ -333,7 +346,7 @@ def render_item(
 
         yield note_header, note_header_len
 
-        for note_line in note_lines:
+        for note_line in note_lines_trunc:
           for wrapped_line, wrapped_line_len in util.wrap_into_paragraph(note_line, width=(note_width - len(note_exp_add_indent))):
             yield (
               note_prefix + note_exp_add_indent + wrapped_line,
