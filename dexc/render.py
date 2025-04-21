@@ -40,7 +40,7 @@ class Symbols:
   ellipsis: str
   link_enabled: bool
 
-  def __init__(self, *, ascii_only: bool, colorize: bool):
+  def __init__(self, *, ascii_only: bool, colorize: bool, render_links: bool):
     if ascii_only:
       self.box_down_left = '+'
       self.box_down_right = '+'
@@ -74,8 +74,6 @@ class Symbols:
       self.color_yellow = '\033[33m'
       self.underline = '\033[4m'
       self.underline_reset = '\033[24m'
-
-      self.link_enabled = True
     else:
       self.color_bold = ''
       self.color_bright_black = ''
@@ -87,7 +85,7 @@ class Symbols:
       self.underline = ''
       self.underline_reset = ''
 
-      self.link_enabled = False
+    self.link_enabled = render_links
 
   # Line number starts at 1
   # Column number starts at 0
@@ -107,18 +105,33 @@ class Symbols:
 
   @classmethod
   def from_file(cls, file: IO[str], options: Options):
-    colorize = options.colorize or (
-      (options.colorize is None) and
-      (not os.environ.get('NO_COLOR')) and
-      (file.isatty() or (
-        (file == sys.stderr) and
-        (get_ipython() is not None))
+    no_color = os.environ.get('NO_COLOR')
+
+    if no_color:
+      colorize = False
+    elif os.environ.get('FORCE_COLOR'):
+      colorize = True
+    elif options.colorize is not None:
+      colorize = options.colorize
+    else:
+      colorize = (
+        file.isatty() or (
+          (file == sys.stderr) and
+          (get_ipython() is not None)
+        )
       )
-    )
+
+    if no_color:
+      render_links = False
+    elif options.render_links is not None:
+      render_links = options.render_links
+    else:
+      render_links = colorize and ('TERM_PROGRAM' in os.environ)
 
     return cls(
       ascii_only=options.ascii_only,
       colorize=colorize,
+      render_links=render_links,
     )
 
 
@@ -627,7 +640,7 @@ def render_frames(
               frame.module.path.as_uri(),
               column_number=(frame.area.col_start if frame.area is not None else None),
               line_number=(frame.area.line_start if frame.area is not None else None),
-            ) if options.target_links else condensed_path
+            )
             frame_title_right_len += condensed_path_len
           elif frame.module.label is not None:
             string = util.wrap_into_ellipsis(frame.module.label, ellipsis=symbols.ellipsis, width=(most_available_width - frame_title_right_len))

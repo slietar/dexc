@@ -25,7 +25,7 @@ class Options:
   max_traces: int = 3
   skip_indentation_highlight: bool = True
   remove_common_indentation: bool = True
-  target_links: bool = True
+  render_links: Optional[bool] = None
 
   @classmethod
   def load(cls, other_dict: dict = {}):
