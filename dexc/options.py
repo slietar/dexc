@@ -1,5 +1,6 @@
-from dataclasses import dataclass
 import json
+import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, TypedDict
 
@@ -23,9 +24,11 @@ class Options:
   max_context_lines_before: int = 3
   max_target_lines: int = 5
   max_traces: int = 3
-  skip_indentation_highlight: bool = True
+  max_width: int = 100
   remove_common_indentation: bool = True
   render_links: Optional[bool] = None
+  skip_indentation_highlight: bool = True
+  width: Optional[int] = None
 
   @classmethod
   def load(cls, other_dict: dict = {}):
@@ -39,6 +42,14 @@ class Options:
         return cls(**other_dict), f'Failed to load options: {e}'
 
     return cls(**other_dict), None
+
+  def get_width(self):
+    if self.width is not None:
+      width = self.width
+    else:
+      width, _ = shutil.get_terminal_size((self.max_width, 24))
+
+    return min(width, self.max_width)
 
 class OptionsDict(TypedDict):
   aggregate_nonuser_frames: bool

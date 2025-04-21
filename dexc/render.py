@@ -171,9 +171,11 @@ def render(
   prefix: str = '',
   profile: RenderProfile = 'default',
   suffix: str = '',
-  width: int = 80, # Excluding prefix and suffix
+  width: Optional[int] = None, # Excluding prefix and suffix
   _symbols: Optional[Symbols] = None,
 ):
+  width_ = options.get_width() if width is None else width
+
   file.write(prefix)
 
   debug = False
@@ -186,14 +188,14 @@ def render(
     floating=False,
     profile=profile,
     symbols=symbols,
-    width=width,
-    width_first=width,
+    width=width_,
+    width_first=width_,
   )):
     if newline_required:
       file.write(prefix)
 
       if debug or suffix:
-        file.write(symbols.color_bright_black + ('·' if debug else ' ') * width + symbols.color_reset)
+        file.write(symbols.color_bright_black + ('·' if debug else ' ') * width_ + symbols.color_reset)
         file.write(suffix)
 
       file.write('\n')
@@ -209,7 +211,7 @@ def render(
     file.write(line)
 
     if debug or suffix:
-      file.write(symbols.color_bright_black + ('·' if debug else ' ') * (width - line_len) + symbols.color_reset)
+      file.write(symbols.color_bright_black + ('·' if debug else ' ') * (width_ - line_len) + symbols.color_reset)
       file.write(suffix)
 
     file.write('\n')

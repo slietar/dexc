@@ -23,7 +23,7 @@ def hook(message: str, category: type[Warning], filename: str, lineno: int, file
   file_ = file if file is not None else sys.stderr
   symbols = Symbols.from_file(file_, options)
 
-  width = 80
+  width = options.get_width()
   warn_message = ' Warning '
   warn_message_shift = 4
 
