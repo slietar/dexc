@@ -1,8 +1,11 @@
 import ast
+import functools
+import importlib.metadata
 import inspect
 import linecache
 import sys
 from dataclasses import dataclass, field
+from importlib.metadata import Distribution
 from pathlib import Path
 from types import FrameType, ModuleType
 from typing import Literal, Optional, TypeAlias
@@ -22,6 +25,8 @@ ModuleKind: TypeAlias = Literal['internal', 'std', 'lib', 'user']
 @dataclass(eq=True, frozen=True, slots=True)
 class ModuleInfo:
   ast: Optional[ast.Module]
+  distribution: Optional[Distribution]
+  editable: bool
   instance: Optional[ModuleType]
   kind: ModuleKind
   label: Optional[str]
@@ -31,9 +36,13 @@ class ModuleInfo:
   relative_path: Optional[Path]
 
 
-@dataclass(slots=True)
+@dataclass # (slots=True)
 class ModuleInspector:
   cache: dict[Path, ModuleInfo] = field(default_factory=dict)
+
+  @functools.cached_property
+  def distribution_map(self):
+    return importlib.metadata.packages_distributions()
 
   def inspect(self, filename: str, frame: Optional[FrameType] = None, partial_source: Optional[PartialSource] = None):
     instance = inspect.getmodule(frame.f_code) if frame is not None else None
@@ -126,16 +135,16 @@ class ModuleInspector:
       label = None
 
 
-    # Get relative path and module kind
-
-    module_kind: ModuleKind
+    # Get relative path
 
     if path is not None:
       relative_path, in_syspath = get_relative_path(path)
-      module_kind = 'lib' if in_syspath else 'user'
     else:
+      in_syspath = False
       relative_path = None
-      module_kind = 'user'
+
+
+    # Get name segments
 
     if instance is not None:
       name_segments = tuple(instance.__name__.split('.'))
@@ -148,10 +157,18 @@ class ModuleInspector:
       name_segments = None
 
 
-    # Mark standard library and internal modules
+    # Improve module kind
 
-    if name_segments is not None:
-      if name_segments in (
+    distribution = None
+    editable = False
+    module_kind: ModuleKind
+
+    if name_segments is None:
+      module_kind = 'user'
+    else:
+      if name_segments == ('__main__',):
+        module_kind = 'user'
+      elif name_segments in (
         ('importlib', '_bootstrap'),
         ('importlib', '_bootstrap_external'),
         ('runpy',),
@@ -159,12 +176,39 @@ class ModuleInspector:
         module_kind = 'internal'
       elif name_segments[0] in sys.stdlib_module_names:
         module_kind = 'std'
+      else:
+        distribution_names = self.distribution_map.get(name_segments[0])
+
+        if distribution_names is None:
+          module_kind = 'user'
+        else:
+          module_kind = 'user' # 'lib' if in_syspath else 'user'
+
+          for distribution_name in distribution_names:
+            distribution = importlib.metadata.distribution(distribution_name)
+            direct_url = distribution.read_text('direct_url.json')
+
+            if direct_url is not None:
+              import json
+
+              try:
+                direct_url = json.loads(direct_url)
+              except json.JSONDecodeError:
+                pass
+              else:
+                editable = direct_url.get('dir_info', {}).get('editable', False)
+
+                if editable:
+                  module_kind = 'user'
+                  break
 
 
     # Create environment
 
     env = ModuleInfo(
       ast=tree,
+      distribution=distribution,
+      editable=editable,
       instance=instance,
       kind=module_kind,
       label=label,
