@@ -154,17 +154,24 @@ def extract_exc_frames(exc: BaseException, /):
   # Inner frames are first
   frames = list[FrameItem]()
 
+  if exc.__traceback__:
+    frames += extract_tb_frames(exc.__traceback__)
+
   # Detect syntax error
   if isinstance(exc, SyntaxError) and (exc.filename is not None):
-    module_info = ModuleInspector().inspect(exc.filename, partial_source=(
-      PartialSource(
-        contents=exc.text,
-        start_line=exc.lineno,
-      )
-    ) if (
-      (exc.text is not None) and
-      (exc.lineno is not None)
-    ) else None)
+    module_info = ModuleInspector().inspect(
+      exc.filename,
+      partial_source=(
+        PartialSource(
+          contents=exc.text,
+          start_line=exc.lineno,
+        ) if (
+          (exc.text is not None) and
+          (exc.lineno is not None)
+        ) else None
+      ),
+      previous_frame=(frames[-1] if frames else None),
+    )
 
     area = create_frame_area(
       line_start=exc.lineno,
@@ -189,10 +196,7 @@ def extract_exc_frames(exc: BaseException, /):
 
     frames.append(frame)
 
-  if exc.__traceback__:
-    frames += extract_tb_frames(exc.__traceback__)
-
-  return frames
+  return frames[::-1]
 
 
 def extract_tb_frames(start_tb: TracebackType, /):
@@ -209,7 +213,8 @@ def extract_tb_frames(start_tb: TracebackType, /):
   inspector = ModuleInspector()
   frames = list[FrameItem]()
 
-  for tb_index, tb in enumerate(reversed(tbs)):
+  # Going from ther outermost to the innermost
+  for tb_index, tb in enumerate(tbs):
     frame = tb.tb_frame
     frame_code = frame.f_code
 
@@ -218,7 +223,7 @@ def extract_tb_frames(start_tb: TracebackType, /):
     ) if tb.tb_lasti >= 0 else None
 
     area = create_frame_area(*positions) if positions is not None else None
-    module_info = inspector.inspect(frame.f_code.co_filename, frame)
+    module_info = inspector.inspect(frame.f_code.co_filename, frame, previous_frame=(frames[-1] if frames else None))
 
     if (module_info.ast is not None) and (area is not None):
       target = identify_node(module_info.ast, area)
@@ -245,7 +250,7 @@ def extract_tb_frames(start_tb: TracebackType, /):
       target=target,
       target_is_module=target_is_module,
       target_name=target_name,
-      reraise=((tb_index > 0) and (target is not None) and isinstance(target.node, ast.Raise)),
+      reraise=((tb_index < len(tbs) - 1) and (target is not None) and isinstance(target.node, ast.Raise)),
     )
 
     frames.append(frame)

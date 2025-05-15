@@ -8,10 +8,13 @@ from dataclasses import dataclass, field
 from importlib.metadata import Distribution
 from pathlib import Path
 from types import FrameType, ModuleType
-from typing import Literal, Optional, TypeAlias
+from typing import TYPE_CHECKING, Literal, Optional, TypeAlias
 
 from .util import get_relative_path
 from .vendor import get_ipython
+
+if TYPE_CHECKING:
+  from .extract import FrameItem
 
 
 @dataclass(slots=True)
@@ -27,6 +30,7 @@ class ModuleInfo:
   ast: Optional[ast.Module]
   distribution: Optional[Distribution]
   editable: bool
+  init: Optional[bool]
   instance: Optional[ModuleType]
   kind: ModuleKind
   label: Optional[str]
@@ -44,7 +48,14 @@ class ModuleInspector:
   def distribution_map(self):
     return importlib.metadata.packages_distributions()
 
-  def inspect(self, filename: str, frame: Optional[FrameType] = None, partial_source: Optional[PartialSource] = None):
+  def inspect(
+    self,
+    filename: str,
+    frame: Optional[FrameType] = None,
+    *,
+    partial_source: Optional[PartialSource] = None,
+    previous_frame: 'Optional[FrameItem]' = None,
+  ):
     instance = inspect.getmodule(frame.f_code) if frame is not None else None
     filename_special = filename.startswith('<') and filename.endswith('>')
 
@@ -148,11 +159,23 @@ class ModuleInspector:
 
     if instance is not None:
       name_segments = tuple(instance.__name__.split('.'))
-    elif relative_path is not None:
-      name_segments = relative_path.with_suffix('').parts
+    elif (
+      (previous_frame is not None) and
+      (previous_frame.target is not None) and
+      isinstance(previous_frame.target.node, ast.Import | ast.ImportFrom) and
+      (previous_frame.module.name_segments is not None) and
+      (previous_frame.module.init is not None)
+    ):
+      name_segments = resolve_import(
+        previous_frame.module.name_segments,
+        previous_frame.target.node,
+        init_or_main=(previous_frame.module.init or (previous_frame.module.name_segments[-1] == '__main__')),
+      )
+    # elif relative_path is not None:
+    #   name_segments = relative_path.with_suffix('').parts
 
-      if name_segments[-1] == '__init__':
-        name_segments = name_segments[:-1]
+    #   if name_segments[-1] == '__init__':
+    #     name_segments = name_segments[:-1]
     else:
       name_segments = None
 
@@ -209,6 +232,7 @@ class ModuleInspector:
       ast=tree,
       distribution=distribution,
       editable=editable,
+      init=(path.stem == '__init__' if path is not None else None),
       instance=instance,
       kind=module_kind,
       label=label,
@@ -222,3 +246,21 @@ class ModuleInspector:
       self.cache[path] = env
 
     return env
+
+
+def resolve_import(importer_name_segments: tuple[str, ...], node: ast.Import | ast.ImportFrom, *, init_or_main: bool = False):
+  if len(node.names) > 1:
+    return None
+
+  match node:
+    case ast.Import():
+      return tuple(node.names[0].name.split('.'))
+
+    case ast.ImportFrom():
+      truncate_level = node.level - (1 if init_or_main else 0)
+
+      return (
+        importer_name_segments[:(-truncate_level if truncate_level > 0 else None)]
+        + (tuple(node.module.split('.')) if node.module else ())
+        + tuple(node.names[0].name.split('.'))
+      )
