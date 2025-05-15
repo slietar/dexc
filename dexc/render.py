@@ -3,7 +3,7 @@ import sys
 from dataclasses import dataclass, field
 from pprint import pprint
 from typing import (IO, Any, Container, Generator, Iterable, Literal, Optional,
-                    Sequence)
+                    Sequence, TypeAlias)
 
 from . import util
 from .compression import Atom
@@ -140,7 +140,7 @@ class LibraryFrameAggregate:
   package_name: str
   frames: list[FrameItem] = field(default_factory=list)
 
-type AggregatedFrame = FrameItem | LibraryFrameAggregate
+AggregatedFrame: TypeAlias = FrameItem | LibraryFrameAggregate
 
 def aggregate_frames(frames: Iterable[FrameItem], options: Options):
   aggregated_frames = list[AggregatedFrame]()
@@ -162,7 +162,7 @@ def aggregate_frames(frames: Iterable[FrameItem], options: Options):
   return aggregated_frames
 
 
-type RenderProfile = Literal['default', 'warning']
+RenderProfile: TypeAlias = Literal['default', 'warning']
 
 def render(
   chain: ExceptionChain,
@@ -226,7 +226,7 @@ def render_item(
   symbols: Symbols,
   width: int,
   width_first: int,
-) -> Generator[tuple[str, int]]:
+): # -> Generator[tuple[str, int]]:
   generic_indent_str = options.generic_indent * ' '
   newline_required = False
 
@@ -479,7 +479,7 @@ def render_frames(
   symbols: Symbols,
   trace_indices: Container[tuple[int, int]],
   width: int, # Excluding indent
-) -> Generator[tuple[str, int]]: # Both including indent
+): # -> Generator[tuple[str, int]]: # Both including indent
   # Additional options
   generic_indent_str = options.generic_indent * ' '
   inset_repeat_box = True
@@ -885,7 +885,7 @@ def render_frames(
                   newline_required = True
 
             if line_end_cut != line_end:
-              cut_message = f'{frame_indent}{generic_indent_str}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]'
+              cut_message = f"{frame_indent}{generic_indent_str}{' ' * (line_number_width + 1)}[{line_end - line_end_cut} more lines]"
               yield cut_message, len(cut_message)
 
               newline_required = True

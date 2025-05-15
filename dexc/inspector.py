@@ -5,7 +5,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import FrameType, ModuleType
-from typing import Literal, Optional
+from typing import Literal, Optional, TypeAlias
 
 from .util import get_relative_path
 from .vendor import get_ipython
@@ -17,7 +17,7 @@ class PartialSource:
   start_line: int
 
 
-type ModuleKind = Literal['internal', 'std', 'lib', 'user']
+ModuleKind: TypeAlias = Literal['internal', 'std', 'lib', 'user']
 
 @dataclass(eq=True, frozen=True, slots=True)
 class ModuleInfo:

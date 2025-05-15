@@ -3,7 +3,7 @@ import re
 import sys
 from pathlib import Path
 from types import TracebackType
-from typing import Callable, Iterable, Optional, Reversible, Sequence
+from typing import Callable, Iterable, Optional, Reversible, Sequence, TypeVar
 
 
 class UnreachableError(Exception):
@@ -125,7 +125,9 @@ def create_tb(start_depth: int = 0):
   return tb
 
 
-def find_common_ancestors[T](items: Iterable[Iterable[T]], /) -> Sequence[T]:
+T = TypeVar('T')
+
+def find_common_ancestors(items: Iterable[Iterable[T]], /) -> Sequence[T]:
   items_iter = iter(items)
 
   try:
@@ -169,7 +171,7 @@ def get_relative_path(path: Path, /) -> tuple[Optional[Path], bool]:
   return None, False
 
 
-def reversed_if[T](it: Reversible[T], condition: bool, /) -> Iterable[T]:
+def reversed_if(it: Reversible[T], condition: bool, /) -> Iterable[T]:
   if condition:
     return reversed(it)
   else:

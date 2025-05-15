@@ -1,9 +1,12 @@
-from typing import Callable, Sequence
+from typing import Callable, Sequence, TypeVar
 
 from . import Atom, Solution
 
 
-def compress[T, S](
+T = TypeVar('T')
+S = TypeVar('S')
+
+def compress(
   items: Sequence[T],
   /,
   *,

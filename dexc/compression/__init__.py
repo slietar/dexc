@@ -1,11 +1,14 @@
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Generic, Sequence, TypeAlias, TypeVar
 
+
+T = TypeVar('T')
+S = TypeVar('S')
 
 @dataclass(slots=True)
-class Atom[T, S]:
+class Atom(Generic[T, S]):
   keys: tuple[S, ...]
   realization: Sequence[T]
   repeat_count: int
 
-type Solution[T, S] = list[Atom[T, S]]
+Solution: TypeAlias = list[Atom[T, S]]

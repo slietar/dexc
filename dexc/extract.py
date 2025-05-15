@@ -4,13 +4,13 @@ import builtins
 import itertools
 from dataclasses import dataclass, field
 from types import NoneType, TracebackType
-from typing import Iterable, Literal, Optional
+from typing import Iterable, Literal, Optional, TypeAlias
 
 from .inspector import ModuleInfo, ModuleInspector, PartialSource
 
 
-type AncestorKind = Literal['class', 'function', 'method']
-type AstNode = ast.Module | ast.expr | ast.stmt
+AncestorKind: TypeAlias = Literal['class', 'function', 'method']
+AstNode: TypeAlias = ast.Module | ast.expr | ast.stmt
 
 @dataclass(frozen=True, slots=True)
 class Ancestor:
@@ -102,7 +102,7 @@ class FrameItem:
     return (self.module.source is not None) and (self.area is not None)
 
 
-type ExceptionChainRelation = Literal['cause', 'context']
+ExceptionChainRelation: TypeAlias = Literal['cause', 'context']
 
 @dataclass(slots=True)
 class ExceptionItem:
@@ -293,7 +293,7 @@ def identify_node(module: ast.Module, area: FrameArea):
     match current_node:
       case ast.Call(func, args, keywords):
         nonchildren_candidates = [func, *args] + [keyword.value for keyword in keywords]
-      case ast.ClassDef(name, bases, keywords, body, decorator_list, type_params):
+      case ast.ClassDef(name, bases, keywords, body, decorator_list):
         children_candidates += body
         children_candidates += decorator_list
         children_candidates += bases
