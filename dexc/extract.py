@@ -156,7 +156,7 @@ def get_inspector():
   return ModuleInspector()
 
 def extract_exc_frames(exc: BaseException, /):
-  # Inner frames are first
+  # Outermost frames are first
   frames = list[FrameItem]()
 
   if exc.__traceback__:
@@ -195,13 +195,13 @@ def extract_exc_frames(exc: BaseException, /):
       module=module_info,
       reraise=False,
       target=None,
-      target_is_module=False,
+      target_is_module=(module_info.name_segments is not None),
       target_name=None,
     )
 
     frames.append(frame)
 
-  return frames[::-1]
+  return frames
 
 
 def extract_tb_frames(start_tb: TracebackType, /):
@@ -215,10 +215,9 @@ def extract_tb_frames(start_tb: TracebackType, /):
 
   # Extract frames
 
-  inspector = ModuleInspector()
-  frames = list[FrameItem]()
+  inspector = get_inspector()
+  frames = list[FrameItem]() # Outermost frames are first
 
-  # Going from ther outermost to the innermost
   for tb_index, tb in enumerate(tbs):
     frame = tb.tb_frame
     frame_code = frame.f_code

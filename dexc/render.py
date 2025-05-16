@@ -12,7 +12,7 @@ from .extract import (ExceptionChain, FrameAreaFull, FrameAreaLines,
                       FrameAreaStartLine, FrameAreaStartLineCol, FrameItem,
                       ModuleInfo)
 from .options import Options
-from .util import UnreachableError
+from .util import UnreachableError, reversed_if
 from .vendor import get_ipython
 
 
@@ -381,10 +381,7 @@ def render_item(
         newline_required = False
 
       # Reversing here so we don't have to reverse every atom later on
-      if options.inner_frame_on_top:
-        frames = item.frames
-      else:
-        frames = reversed(item.frames)
+      frames = util.reversed_if(item.frames, options.inner_frame_on_top)
 
       aggregated_frames = aggregate_frames(frames, options)
       atoms = compress(aggregated_frames, backwards=(not options.compression_first_on_top))
@@ -554,7 +551,7 @@ def render_frames(
           if options.include_module_name_in_frames and (frame.module.name_segments is not None):
             target_path.append('.'.join(frame.module.name_segments))
 
-            if frame.module.entry_main:
+            if frame.module.entry_main and (frame.module.name_segments[-1] != '__main__'):
               target_path[-1] += ' (as __main__)'
 
           if frame.target is not None:
