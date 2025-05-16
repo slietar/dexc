@@ -1,6 +1,7 @@
 from abc import ABC
 import ast
 import builtins
+import functools
 import itertools
 from dataclasses import dataclass, field
 from types import NoneType, TracebackType
@@ -150,6 +151,10 @@ def extract_exc_chain(start_exc: BaseException, /):
 
 
 
+@functools.cache
+def get_inspector():
+  return ModuleInspector()
+
 def extract_exc_frames(exc: BaseException, /):
   # Inner frames are first
   frames = list[FrameItem]()
@@ -159,7 +164,7 @@ def extract_exc_frames(exc: BaseException, /):
 
   # Detect syntax error
   if isinstance(exc, SyntaxError) and (exc.filename is not None):
-    module_info = ModuleInspector().inspect(
+    module_info = get_inspector().inspect(
       exc.filename,
       partial_source=(
         PartialSource(

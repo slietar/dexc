@@ -554,6 +554,9 @@ def render_frames(
           if options.include_module_name_in_frames and (frame.module.name_segments is not None):
             target_path.append('.'.join(frame.module.name_segments))
 
+            if frame.module.entry_main:
+              target_path[-1] += ' (as __main__)'
+
           if frame.target is not None:
             ancestor_names = [ancestor.name for ancestor in frame.target.ancestors()]
             target_path += ancestor_names
@@ -632,15 +635,8 @@ def render_frames(
           if frame.module.relative_path is not None:
             assert frame.module.path is not None
 
-            path_parts = list[str]()
-
-            if frame.module.kind == 'user':
-              path_parts.append('.')
-
-            path_parts += frame.module.relative_path.parts
-
             condensed_path, condensed_path_len = util.condense_parts(
-              path_parts,
+              frame.module.relative_path.parts,
               ellipsis=symbols.ellipsis,
               separator='/',
               width=(most_available_width - frame_title_right_len),

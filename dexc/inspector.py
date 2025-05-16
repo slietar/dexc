@@ -10,7 +10,6 @@ from pathlib import Path
 from types import FrameType, ModuleType
 from typing import TYPE_CHECKING, Literal, Optional, TypeAlias
 
-from .util import get_relative_path
 from .vendor import get_ipython
 
 if TYPE_CHECKING:
@@ -30,7 +29,7 @@ class ModuleInfo:
   ast: Optional[ast.Module]
   distribution: Optional[Distribution]
   editable: bool
-  init: Optional[bool]
+  entry_main: Optional[bool]
   instance: Optional[ModuleType]
   kind: ModuleKind
   label: Optional[str]
@@ -40,7 +39,7 @@ class ModuleInfo:
   relative_path: Optional[Path]
 
 
-@dataclass # (slots=True)
+@dataclass
 class ModuleInspector:
   cache: dict[Path, ModuleInfo] = field(default_factory=dict)
 
@@ -146,38 +145,74 @@ class ModuleInspector:
       label = None
 
 
-    # Get relative path
-
-    if path is not None:
-      relative_path, in_syspath = get_relative_path(path)
-    else:
-      in_syspath = False
-      relative_path = None
-
-
     # Get name segments
 
     if instance is not None:
       name_segments = tuple(instance.__name__.split('.'))
-    elif (
-      (previous_frame is not None) and
-      (previous_frame.target is not None) and
-      isinstance(previous_frame.target.node, ast.Import | ast.ImportFrom) and
-      (previous_frame.module.name_segments is not None) and
-      (previous_frame.module.init is not None)
-    ):
-      name_segments = resolve_import(
-        previous_frame.module.name_segments,
-        previous_frame.target.node,
-        init_or_main=(previous_frame.module.init or (previous_frame.module.name_segments[-1] == '__main__')),
-      )
-    # elif relative_path is not None:
-    #   name_segments = relative_path.with_suffix('').parts
+      entry_main = name_segments == ('__main__',)
 
-    #   if name_segments[-1] == '__init__':
-    #     name_segments = name_segments[:-1]
+      if entry_main:
+        if instance.__spec__ is not None:
+          name_segments = tuple(instance.__spec__.name.split('.'))
+        else:
+          name_segments = None
     else:
+      entry_main = None
       name_segments = None
+
+
+    # Get relative path
+
+    if path is not None:
+      cwd = Path.cwd()
+      roots = [*(p for path in sys.path if path and ((p := Path(path)) != cwd) and not p.suffix), cwd]
+
+      for root in roots:
+        # print("Test", path, root, repr(root.suffix))
+        try:
+          potential_relative_path = path.relative_to(root)
+        except ValueError:
+          pass
+        else:
+          potential_name_segments = (
+            tuple(potential_relative_path.parent.parts) +
+            ((path.stem,) if path.name != '__init__.py' else ())
+          )
+
+          if name_segments is not None:
+            if name_segments != potential_name_segments:
+              continue
+          else:
+            name_segments = potential_name_segments
+
+          in_cwd = root == cwd
+          relative_path = potential_relative_path
+          break
+      else:
+        in_cwd = False
+        relative_path = None
+    else:
+      in_cwd = False
+      relative_path = None
+
+
+    # if (name_segments is not None) and (path is not None) and (name_segments != ('__main__',)):
+    #   path_parts = list(name_segments)
+
+    #   if path.name == '__init__.py':
+    #     path_parts.append('__init__.py')
+    #   else:
+    #     path_parts[-1] += '.py'
+
+    #   relative_path: Optional[Path] = functools.reduce(operator.truediv, path_parts, Path('.'))
+    # else:
+    #   relative_path = None
+
+    # if path is not None:
+    #   relative_path, in_syspath = get_relative_path(path, name_segments)
+    # else:
+    #   in_syspath = False
+    #   relative_path = None
 
 
     # Improve module kind
@@ -189,9 +224,7 @@ class ModuleInspector:
     if name_segments is None:
       module_kind = 'user'
     else:
-      if name_segments == ('__main__',):
-        module_kind = 'user'
-      elif name_segments in (
+      if name_segments in (
         ('importlib', '_bootstrap'),
         ('importlib', '_bootstrap_external'),
         ('runpy',),
@@ -202,10 +235,10 @@ class ModuleInspector:
       else:
         distribution_names = self.distribution_map.get(name_segments[0])
 
-        if distribution_names is None:
+        if (distribution_names is None) or in_cwd:
           module_kind = 'user'
         else:
-          module_kind = 'user' # 'lib' if in_syspath else 'user'
+          module_kind = 'lib'
 
           for distribution_name in distribution_names:
             distribution = importlib.metadata.distribution(distribution_name)
@@ -232,7 +265,7 @@ class ModuleInspector:
       ast=tree,
       distribution=distribution,
       editable=editable,
-      init=(path.stem == '__init__' if path is not None else None),
+      entry_main=entry_main,
       instance=instance,
       kind=module_kind,
       label=label,
