@@ -1,12 +1,6 @@
-import json
 import shutil
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional, TypedDict
-
-
-OPTIONS_RELATIVE_PATH = '.config/dexc/options.json'
-OPTIONS_ABSOLUTE_PATH = Path.home() / OPTIONS_RELATIVE_PATH
+from typing import Optional
 
 
 @dataclass(kw_only=True, slots=True)
@@ -30,19 +24,6 @@ class Options:
   skip_indentation_highlight: bool = True
   width: Optional[int] = None
 
-  @classmethod
-  def load(cls, other_dict: dict = {}):
-    if OPTIONS_ABSOLUTE_PATH.exists():
-      try:
-        with OPTIONS_ABSOLUTE_PATH.open() as options_file:
-          options_dict = json.load(options_file)
-
-        return cls(**(options_dict | other_dict)), None
-      except OSError as e:
-        return cls(**other_dict), f'Failed to load options: {e}'
-
-    return cls(**other_dict), None
-
   def get_width(self):
     if self.width is not None:
       width = self.width
@@ -50,23 +31,3 @@ class Options:
       width, _ = shutil.get_terminal_size((self.max_width, 24))
 
     return max(min(width, self.max_width), 40)
-
-class OptionsDict(TypedDict):
-  aggregate_nonuser_frames: bool
-  ascii_only: bool
-  chain_origin_on_top: bool
-  colorize: Optional[bool]
-  compression_first_on_top: bool
-  display_internal_frames: bool
-  generic_indent: int
-  include_module_name_in_frames: bool
-  inner_frame_on_top: bool
-  max_context_lines_after: int
-  max_context_lines_before: int
-  max_target_lines: int
-  max_traces: int
-  max_width: int
-  remove_common_indentation: bool
-  render_links: Optional[bool]
-  skip_indentation_highlight: bool
-  width: Optional[int]

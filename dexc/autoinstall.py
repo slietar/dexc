@@ -1,9 +1,6 @@
-from .hooks.errors import install_errors
-from .hooks.warnings import install_warnings
+from .lib import autoinstall
 
 
-install_errors()
-install_warnings()
-
+autoinstall()
 
 __all__ = []

@@ -1,25 +1,33 @@
-import contextlib
-from typing import IO
+import os
+import sys
+from typing import IO, TYPE_CHECKING
 
 from .hooks.errors import install_errors
 from .hooks.warnings import install_warnings
-from .options import Options
+
+if TYPE_CHECKING:
+  from .options import Options
 
 
-def dump(exc: BaseException, file: IO[str], options: Options):
+def autoinstall():
+  if (os.environ.get('DEXC_DISABLE') != '1') and (sys.excepthook == sys.__excepthook__):
+    install()
+
+
+def dump(exc: BaseException, file: IO[str], options: 'Options'):
   from .extract import extract
   from .render import render
 
   render(extract(exc), file, options)
 
 
-@contextlib.contextmanager
-def installed(options: Options):
-  cleanup_errors = install_errors()
-  cleanup_warnings = install_warnings()
+def install():
+  install_errors()
+  install_warnings()
 
-  try:
-    yield
-  finally:
-    cleanup_errors()
-    cleanup_warnings()
+
+__all__ = [
+  'autoinstall',
+  'dump',
+  'install',
+]
