@@ -1,8 +1,8 @@
-from . import install
-from .warnings import install_warnings
+from .hooks.errors import install_errors
+from .hooks.warnings import install_warnings
 
 
-install()
+install_errors()
 install_warnings()
 
 

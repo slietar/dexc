@@ -3,10 +3,10 @@ from typing import Optional, TextIO
 
 
 def hook(message: str, category: type[Warning], filename: str, lineno: int, file: Optional[TextIO] = None, line: Optional[str] = None):
-  from .extract import ExceptionChain, ExceptionItem, extract_tb_frames
-  from .options import Options
-  from .render import Symbols, render
-  from .util import create_tb
+  from ..extract import ExceptionChain, ExceptionItem, extract_tb_frames
+  from ..options import Options
+  from ..render import Symbols, render
+  from ..util import create_tb
 
   tb = create_tb(1)
 
@@ -61,4 +61,12 @@ def hook(message: str, category: type[Warning], filename: str, lineno: int, file
 
 def install_warnings():
   import warnings
+
+  old_hook = warnings.showwarning
   warnings.showwarning = hook
+
+  def cleanup():
+    if warnings.showwarning is hook:
+      warnings.showwarning = old_hook
+
+  return cleanup

@@ -38,7 +38,7 @@ class Options:
           options_dict = json.load(options_file)
 
         return cls(**(options_dict | other_dict)), None
-      except Exception as e:
+      except OSError as e:
         return cls(**other_dict), f'Failed to load options: {e}'
 
     return cls(**other_dict), None
