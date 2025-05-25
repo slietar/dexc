@@ -1,65 +1,31 @@
 # dexc
 
-This Python project is an exception formatter that produces readable stack traces.
+Dexc is a Python exception formatter that focuses on the important parts of stack traces.
 
-It only supports Python 3.12 and later.
+Dexc supports Python 3.13 and later.
 
 
 ## Features
 
-### Current features
-
-- Context displayed in addition to the trace line of each frame
-- Reversed frame order i.e. JavaScript-like
+- Context displayed in addition to the main line of each frame
 - Truncated trace lines when there are too many
 - Colorized stack trace obeying the the [NO_COLOR](https://no-color.org/) environment variable
-- Minimzed frames when those are not part of the user code
-- Support for exception groups
+- Minimization of frames when they are not part of the user code
+- Support for Exception groups
 - Highlighting of re-raises i.e. when an exception is caught and re-raised with more than a simple `raise`, causing two stack traces to be concatenated without separation
-- Formatting of [unraisable exceptions](https://docs.python.org/3/library/sys.html#sys.unraisablehook) e.g. raised in a destructor
+- Handling of [unraisable exceptions](https://docs.python.org/3/library/sys.html#sys.unraisablehook) e.g. raised in a destructor
 - Support for syntax errors
+- Support for exception notes
+- Support for warnings
+- Collapse of repeated frames or groups of frames
+- Disabling using the `DEXC_DISABLE=1` environment variable
 
-### Future features
 
-- Better checks e.g. when the column number is not available but the line number is
-- Improve support for exception groups
-- User vs lib tb kinds
-- Avoid repeating recursive calls e.g. infinite loop
-- Maximum screen width
-- Option to reverse order
-- Better highlight re-raises
-- More ast nodes supported
-- More precise ast node targeting e.g. should work if all statements are on the same line
-- Handle multiprocessing.pool.RemoteTraceback which currently is text
-- Better highlighting using ast data (e.g. only highlight first line of for loop)
-- Formatting of exceptions raised in threads
-- Better handling of file paths e.g. site-packages
-- Perhaps syntax highlighting
-- Avoid highlighting large nodes e.g. highlight a function and parentheses instead of the arguments if the function call is failing
-- Other [escape codes](https://iterm2.com/documentation-escape-codes.html) e.g. curly underlines or clickable file names
-- Other [characters](https://www.willmcgugan.com/blog/tech/post/ceo-just-wants-to-draw-boxes/)
-- Smaller traces when explicit raise
-- Adapt to window height
-- Bug when `[Caused by]` is inside exception groups
-- Show a single listing when the same file is in multiple frames
-- Show function and class definitions from earlier
-- Support for IPython e.g. by calling `IPython.get_ipython().set_custom_exc(...)` and ensuring there is still color there; metadata on which cell the exception was raised in
-  - https://github.com/ipython/ipython/blob/main/IPython/core/ultratb.py
-  - https://ipython.readthedocs.io/en/stable/api/generated/IPython.core.ultratb.html
-- When printing `[Raised while handling]` or `[Caused by]`, merge both traces at the try/except statement
-- When too many lines, show at least the first and last lines of the relevant statement
-- Protect against too many columns
-- Exception info serialization
-- Remove newline when highlight is on last line e.g.
-  ```
-      4 raise Exception
-        ^^^^^^^^^^^^^^^
-                                     <--- Remove this line
-  at _run_code (<frozen runpy>)
-  at _run_module_as_main (<frozen runpy>)
-  ```
-- Add env variable to disable hook
-- Only import on hook call
+## Caveats
+
+Dexc should not be used in production code or to format untrusted exceptions. Because it relies on certain CPython-specific APIs, it may break on other runtimes or if your code displays exotic behavior, such as modifying `sys.modules` or updating source files while the program is running.
+
+Furthermore, Dexc may produce incorrect output if your code or exception messages contain non-ASCII characters.
 
 
 ## Installation
@@ -74,11 +40,27 @@ $ pip install dexc
 ```py
 import dexc
 dexc.install()
+
+# Or:
+
+import dexc.autoinstall
 ```
 
 
 ## Related work
 
-- [Pretty traceback](https://github.com/mbarkhau/pretty-traceback)
-- [Rich](https://www.willmcgugan.com/blog/tech/post/better-python-tracebacks-with-rich/)
-- [Stack printer](https://github.com/cknd/stackprinter)
+| Name                                                                                                | Local lookup | Notes                                                                                                   |
+|-----------------------------------------------------------------------------------------------------|--------------|---------------------------------------------------------------------------------------------------------|
+| [backtrace](https://github.com/nir0s/backtrace)                                                     | no           | One line per frame                                                                                      |
+| [better-exceptions](https://github.com/qix-/better-exceptions)                                      | yes          | Same layout as the default                                                                              |
+| [colored-traceback](https://github.com/staticshock/colored-traceback.py)                            | no           | Adds color to the default traceback                                                                     |
+| [friendly-traceback](https://github.com/friendly-traceback/friendly-traceback)                      | no           | Provides error explanations                                                                             |
+| [frosch](https://github.com/HallerPatrick/frosch)                                                   | yes          |                                                                                                         |
+| [IPython ultratb](https://ipython.readthedocs.io/en/stable/api/generated/IPython.core.ultratb.html) | no           | Same layout as the default                                                                              |
+| [Pretty Traceback](https://github.com/mbarkhau/pretty-traceback)                                    | no           | One line per frame                                                                                      |
+| [pretty-errors](https://github.com/onelivesleft/PrettyErrors)                                       | yes          |                                                                                                         |
+| [ptb](https://github.com/chillaranand/ptb)                                                          | no           |                                                                                                         |
+| [Rich tracebacks](https://rich.readthedocs.io/en/stable/traceback.html)                             | no           | See also [this article](https://www.willmcgugan.com/blog/tech/post/better-python-tracebacks-with-rich/) |
+| [rich-traceback](https://github.com/laurb9/rich-traceback)                                          | no           |                                                                                                         |
+| [stackprinter](https://github.com/cknd/stackprinter)                                                | yes          |                                                                                                         |
+| [TBVaccine](https://github.com/skorokithakis/tbvaccine)                                             | yes          | Same layout as the default                                                                              |
