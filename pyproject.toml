@@ -1,13 +1,18 @@
 [build-system]
-requires = ["flit_core~=3.9.0"]
-build-backend = "flit_core.buildapi"
+requires = ["oryn~=1.0"]
+build-backend = "oryn"
 
 [project]
-dynamic = ["description", "version"]
 name = "dexc"
-classifiers = ["License :: OSI Approved :: European Union Public Licence 1.2 (EUPL 1.2)"]
+version = "0.1.0"
+description = "A Python exception formatter"
+license = "EUPL-1.2"
 readme = "readme.md"
-requires-python = "~=3.11"
+requires-python = "~=3.13"
 
 [project.urls]
-Homepage = "https://github.com/slietar/dexc"
+Repository = "https://github.com/slietar/dexc"
+
+[tool.oryn]
+include = ["dexc"]
+ignore = ["*_test.py", "test.py"]
