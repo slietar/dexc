@@ -1,8 +1,6 @@
 # dexc
 
-Dexc is a Python exception formatter that focuses on the important parts of stack traces.
-
-Dexc supports Python 3.13 and later.
+Dexc is a Python exception formatter. It supports Python 3.13 and later.
 
 
 ## Features
@@ -63,4 +61,4 @@ import dexc.autoinstall
 | [Rich tracebacks](https://rich.readthedocs.io/en/stable/traceback.html)                             | no           | See also [this article](https://www.willmcgugan.com/blog/tech/post/better-python-tracebacks-with-rich/) |
 | [rich-traceback](https://github.com/laurb9/rich-traceback)                                          | no           |                                                                                                         |
 | [stackprinter](https://github.com/cknd/stackprinter)                                                | yes          |                                                                                                         |
-| [TBVaccine](https://github.com/skorokithakis/tbvaccine)                                             | yes          | Same layout as the default                                                                              |
+| [TBVaccine](https://github.com/skorokithakis/tbvaccine)                                             | yes          | Same layout as the default; includes `.pth`                                                             |

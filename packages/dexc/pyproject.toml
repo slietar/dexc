@@ -5,14 +5,14 @@ build-backend = "oryn"
 [project]
 name = "dexc"
 version = "0.2.0"
-description = "A Python exception formatter"
+description = "Exception formatter"
 license = "EUPL-1.2"
-readme = "readme.md"
+readme = "../../readme.md"
 requires-python = "~=3.13"
 
 [project.urls]
 Repository = "https://github.com/slietar/dexc"
 
 [tool.oryn]
-include = ["dexc"]
+include = ["src/*"]
 ignore = ["*_test.py", "test.py"]

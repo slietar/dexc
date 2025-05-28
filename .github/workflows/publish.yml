@@ -18,6 +18,6 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
       - name: Build package distributions
-        run: uv build --wheel
+        run: uv build --project packages/dexc --wheel
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
