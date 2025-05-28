@@ -1,6 +1,6 @@
 # dexc
 
-Dexc is a Python exception formatter. It supports Python 3.13 and later.
+Dexc is a Python exception formatter. It supports Python 3.11 and later.
 
 
 ## Features

@@ -2,7 +2,6 @@ import ast
 import builtins
 import functools
 import itertools
-import sys
 from abc import ABC
 from dataclasses import dataclass, field
 from types import NoneType, TracebackType
@@ -143,11 +142,7 @@ def extract_exc_chain(start_exc: BaseException, /):
 
   def map_exc(exc: BaseException):
     return ExceptionItem(
-      children=(
-        [extract_exc_chain(exc) for exc in exc.exceptions]
-        if sys.version_info >= (3, 11) and isinstance(exc, BaseExceptionGroup)
-        else []
-      ),
+      children=([extract_exc_chain(exc) for exc in exc.exceptions] if isinstance(exc, BaseExceptionGroup) else []),
       frames=extract_exc_frames(exc),
       instance=exc,
     )
@@ -227,12 +222,9 @@ def extract_tb_frames(start_tb: TracebackType, /):
     frame = tb.tb_frame
     frame_code = frame.f_code
 
-    if sys.version_info >= (3, 11):
-      positions = next(
-        itertools.islice(frame_code.co_positions(), tb.tb_lasti // 2, None)
-      ) if tb.tb_lasti >= 0 else None
-    else:
-      positions = None
+    positions = next(
+      itertools.islice(frame_code.co_positions(), tb.tb_lasti // 2, None)
+    ) if tb.tb_lasti >= 0 else None
 
     area = create_frame_area(*positions) if positions is not None else None
     module_info = inspector.inspect(frame.f_code.co_filename, frame, previous_frame=(frames[-1] if frames else None))
@@ -303,9 +295,6 @@ def identify_node(module: ast.Module, area: FrameArea):
   current_node: AstNode = module
   parent_nodes = list[AstNode]()
 
-  # This will just duplicate the Try pattern in old versions of Python
-  TryStar = ast.TryStar if sys.version_info >= (3, 11) else ast.Try
-
   while True:
     children_candidates = list[ast.expr | ast.stmt]()
     nonchildren_candidates = list[ast.expr | ast.stmt]()
@@ -327,7 +316,7 @@ def identify_node(module: ast.Module, area: FrameArea):
         children_candidates += body
       case ast.AsyncFor(target, iter, body, orelse, type_comment) | ast.For(target, iter, body, orelse, type_comment):
         children_candidates += [target, iter, *body, *orelse]
-      case ast.Try(body, handlers, orelse, finalbody) | TryStar(body, handlers, orelse, finalbody):
+      case ast.Try(body, handlers, orelse, finalbody) | ast.TryStar(body, handlers, orelse, finalbody):
         children_candidates += [*body, *orelse, *finalbody]
         nonchildren_candidates += [handler.type for handler in handlers]
 

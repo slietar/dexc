@@ -1,5 +1,5 @@
 [build-system]
-requires = ["oryn~=1.0"]
+requires = ["oryn~=1.2"]
 build-backend = "oryn"
 
 [project]
@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Exception formatter"
 license = "EUPL-1.2"
 readme = "../../readme.md"
-requires-python = "~=3.10"
+requires-python = "~=3.11"
 
 [project.urls]
 Repository = "https://github.com/slietar/dexc"
