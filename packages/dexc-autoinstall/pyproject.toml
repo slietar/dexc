@@ -1,0 +1,20 @@
+[build-system]
+requires = ["oryn~=1.0"]
+build-backend = "oryn"
+
+[project]
+name = "dexc-autoinstall"
+version = "0.2.0"
+description = "Exception formatter"
+license = "EUPL-1.2"
+readme = "../../readme.md"
+requires-python = "~=3.13"
+dependencies = [
+  "dexc==0.2.0",
+]
+
+[project.urls]
+Repository = "https://github.com/slietar/dexc"
+
+[tool.oryn]
+include = ["dexc_autoinstall.pth"]
