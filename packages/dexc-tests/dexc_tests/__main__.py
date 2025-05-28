@@ -16,7 +16,7 @@ def run_test(module_name: str):
     mod = __import__(module_name, fromlist=('a'))
     mod.main()
   except Exception as e:
-    dexc.dump(e, sys.stderr, Options.load()[0])
+    dexc.dump(e, sys.stderr, Options())
 
 
 if len(sys.argv) > 1:

@@ -13,4 +13,4 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-dexc = { path = "..", editable = true }
+dexc = { path = "../dexc" }
