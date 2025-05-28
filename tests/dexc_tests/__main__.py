@@ -4,7 +4,7 @@ from pathlib import Path
 
 import dexc
 from dexc.options import Options
-from dexc.warnings import install_warnings
+from dexc.hooks.warnings import install_warnings
 
 
 install_warnings()
@@ -26,5 +26,5 @@ else:
     if '_' in file_path.stem:
       continue
 
-    print(f'-- {file_path.stem} {'-' * 73}', file=sys.stderr)
+    print(f'-- {file_path.stem} '.ljust(100, '-'), file=sys.stderr)
     run_test(f'dexc_tests.{file_path.stem}')
