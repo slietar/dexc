@@ -70,10 +70,16 @@ class ModuleInspector:
 
     # Find path using instance or code
 
-    path_raw = (
-      (inspect.getabsfile(instance) if instance is not None else None) or
-      (inspect.getabsfile(frame.f_code) if (frame is not None) and not filename_special else None)
-    )
+    path_raw: Optional[str] = None
+
+    if instance is not None:
+      try:
+        path_raw = inspect.getabsfile(instance)
+      except TypeError:
+        pass
+
+    if (path_raw is None) and (frame is not None) and (not filename_special):
+      path_raw = inspect.getabsfile(frame.f_code)
 
     if path_raw is not None:
       path = Path(path_raw)
@@ -98,7 +104,7 @@ class ModuleInspector:
     if instance is not None:
       try:
         source = inspect.getsource(instance)
-      except OSError:
+      except (OSError, TypeError):
         source = None
     else:
       source = None

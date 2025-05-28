@@ -1,7 +1,7 @@
 [project]
 name = "dexc_tests"
 version = "0.0.0"
-requires-python = "~=3.13"
+requires-python = "~=3.10"
 dependencies = [
     "dexc",
     "ipykernel==6.29.5",
