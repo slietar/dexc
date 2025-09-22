@@ -1,8 +1,8 @@
 import asyncio
 
-def main():
+async def main():
   class A:
     async def a(self):
       raise Exception
 
-  asyncio.run(A().a())
+  await A().a()

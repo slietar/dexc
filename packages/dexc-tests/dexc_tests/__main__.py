@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import warnings
 from pathlib import Path
@@ -14,7 +15,10 @@ warnings.filterwarnings('always')
 def run_test(module_name: str):
   try:
     mod = __import__(module_name, fromlist=('a'))
-    mod.main()
+    result = mod.main()
+
+    if asyncio.iscoroutine(result):
+      asyncio.run(result)
   except Exception as e:
     dexc.dump(e, sys.stderr, Options())
 
