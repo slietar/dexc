@@ -1,5 +1,5 @@
 [build-system]
-requires = ["oryn~=1.2"]
+requires = ["oryn~=1.3"]
 build-backend = "oryn"
 
 [project]

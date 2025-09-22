@@ -1,5 +1,5 @@
 [build-system]
-requires = ["oryn~=1.2"]
+requires = ["oryn~=1.3"]
 build-backend = "oryn"
 
 [project]
@@ -8,9 +8,9 @@ version = "0.4.0"
 description = "Exception formatter"
 license = "EUPL-1.2"
 readme = "../../readme.md"
-requires-python = "~=3.10"
+requires-python = "~=3.11"
 dependencies = [
-  "dexc==0.4.0",
+  "dexc",
 ]
 
 [project.urls]
