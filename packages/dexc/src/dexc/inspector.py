@@ -4,6 +4,7 @@ import importlib.metadata
 import inspect
 import linecache
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from importlib.metadata import Distribution
 from pathlib import Path
@@ -44,7 +45,10 @@ class ModuleInspector:
   cache: dict[Path, ModuleInfo] = field(default_factory=dict)
 
   @functools.cached_property
-  def distribution_map(self):
+  def distribution_map(self) -> Mapping[str, list[str]]:
+    if sys.is_finalizing():
+      return {}
+
     return importlib.metadata.packages_distributions()
 
   def inspect(
@@ -55,8 +59,14 @@ class ModuleInspector:
     partial_source: Optional[PartialSource] = None,
     previous_frame: 'Optional[FrameItem]' = None,
   ):
-    instance = inspect.getmodule(frame.f_code) if frame is not None else None
+    # Find instance if the frame is given
+
     filename_special = filename.startswith('<') and filename.endswith('>')
+
+    if (frame is not None) and not sys.is_finalizing():
+      instance = inspect.getmodule(frame.f_code)
+    else:
+      instance = None
 
 
     # Find instance in some rare cases
@@ -171,7 +181,11 @@ class ModuleInspector:
 
     if path is not None:
       cwd = Path.cwd()
-      roots = [*(p for path in sys.path if path and ((p := Path(path)) != cwd) and not p.suffix), cwd]
+
+      if not sys.is_finalizing():
+        roots = [*(p for path in sys.path if path and ((p := Path(path)) != cwd) and not p.suffix), cwd]
+      else:
+        roots = [cwd]
 
       for root in roots:
         # print("Test", path, root, repr(root.suffix))
@@ -202,25 +216,6 @@ class ModuleInspector:
       relative_path = None
 
 
-    # if (name_segments is not None) and (path is not None) and (name_segments != ('__main__',)):
-    #   path_parts = list(name_segments)
-
-    #   if path.name == '__init__.py':
-    #     path_parts.append('__init__.py')
-    #   else:
-    #     path_parts[-1] += '.py'
-
-    #   relative_path: Optional[Path] = functools.reduce(operator.truediv, path_parts, Path('.'))
-    # else:
-    #   relative_path = None
-
-    # if path is not None:
-    #   relative_path, in_syspath = get_relative_path(path, name_segments)
-    # else:
-    #   in_syspath = False
-    #   relative_path = None
-
-
     # Improve module kind
 
     distribution = None
@@ -236,7 +231,7 @@ class ModuleInspector:
         ('runpy',),
       ):
         module_kind = 'internal'
-      elif name_segments[0] in sys.stdlib_module_names:
+      elif name_segments[0] in sys.stdlib_module_names:  # Still valid while finalizing
         module_kind = 'std'
       else:
         distribution_names = self.distribution_map.get(name_segments[0])
@@ -246,23 +241,24 @@ class ModuleInspector:
         else:
           module_kind = 'lib'
 
-          for distribution_name in distribution_names:
-            distribution = importlib.metadata.distribution(distribution_name)
-            direct_url = distribution.read_text('direct_url.json')
+          if not sys.is_finalizing():
+            for distribution_name in distribution_names:
+              distribution = importlib.metadata.distribution(distribution_name)
+              direct_url = distribution.read_text('direct_url.json')
 
-            if direct_url is not None:
-              import json
+              if direct_url is not None:
+                import json
 
-              try:
-                direct_url = json.loads(direct_url)
-              except json.JSONDecodeError:
-                pass
-              else:
-                editable = direct_url.get('dir_info', {}).get('editable', False)
+                try:
+                  direct_url = json.loads(direct_url)
+                except json.JSONDecodeError:
+                  pass
+                else:
+                  editable = direct_url.get('dir_info', {}).get('editable', False)
 
-                if editable:
-                  module_kind = 'user'
-                  break
+                  if editable:
+                    module_kind = 'user'
+                    break
 
 
     # Create environment
