@@ -129,11 +129,11 @@ def extract_exc_chain(start_exc: BaseException, /):
   relations = list[ExceptionChainRelation]()
 
   while True:
-    if current_exc.__cause__:
+    if current_exc.__cause__ is not None:
       current_exc = current_exc.__cause__
       excs.append(current_exc)
       relations.append('cause')
-    elif current_exc.__context__:
+    elif (current_exc.__context__ is not None) and not current_exc.__suppress_context__:
       current_exc = current_exc.__context__
       excs.append(current_exc)
       relations.append('context')
