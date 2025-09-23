@@ -3,10 +3,17 @@ import sys
 from types import TracebackType
 from typing import IO, TYPE_CHECKING, Optional
 
+from ..extract import (
+  ExceptionChain,
+  ExceptionItem,
+  ExceptionPairDetails,
+  extract_tb_frames,
+)
+
 if TYPE_CHECKING:
   from sys import UnraisableHookArgs
 
-  from IPython.core.interactiveshell import InteractiveShell # type: ignore
+  from IPython.core.interactiveshell import InteractiveShell  # type: ignore
 
   from ..options import Options
 
@@ -39,16 +46,26 @@ def install_errors(*, file: IO[str] = sys.stderr, options: 'Optional[Options]' =
     # See: https://vstinner.github.io/sys-unraisablehook-python38.html
     def unraisable_hook(arg: 'UnraisableHookArgs'):
       if arg.exc_value is not None:
-        # Not using dump() because must lazy imports cannot be used while the
-        # interpreter is shutting down, which is often the case when this hook is
-        # called.
-        render(
-          UnraisableExceptionOccurence(extract(arg.exc_value), arg.object),
-          file,
-          options or Options(),
-        )
+        chain = extract(arg.exc_value)
       else:
-        old_unraisable_hook(arg)
+        if arg.exc_traceback is not None:
+          frames = extract_tb_frames(arg.exc_traceback)
+        else:
+          frames = []
+
+        chain = ExceptionChain([ExceptionItem(
+          details=ExceptionPairDetails(arg.exc_type, arg.err_msg),
+          frames=frames,
+        )])
+
+      # Not using dump() because must lazy imports cannot be used while the
+      # interpreter is shutting down, which is often the case when this hook is
+      # called.
+      render(
+        UnraisableExceptionOccurence(chain, arg.object),
+        file,
+        options or Options(),
+      )
 
     sys.unraisablehook = unraisable_hook
   else:
