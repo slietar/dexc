@@ -144,6 +144,7 @@ class ModuleInspector:
     if (source is None) and (partial_source is not None):
       source = '\n' * (partial_source.start_line - 1) + partial_source.contents
 
+
     # Find label
 
     ipython = get_ipython()

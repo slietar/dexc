@@ -12,6 +12,7 @@ from ..extract import (
   RegularExceptionOccurence,
   ResourceExceptionOccurence,
   extract_tb_frames,
+  extract_tracemalloc_traceback,
 )
 from ..util import create_tb
 
@@ -95,7 +96,7 @@ def install_warnings(*, options: 'Optional[Options]' = None):
           msg.message,
         )
 
-      tb = create_tb(1)
+      tb = create_tb()
 
       item = ExceptionItem(
         children=[],
@@ -106,7 +107,20 @@ def install_warnings(*, options: 'Optional[Options]' = None):
       chain = ExceptionChain([item], relations=[])
 
       if msg.source is not None:
-        occurence = ResourceExceptionOccurence(chain, target=msg.source)
+        import tracemalloc
+
+        target_traceback = tracemalloc.get_object_traceback(msg.source)
+
+        if target_traceback is not None:
+          target_frames = extract_tracemalloc_traceback(target_traceback)
+        else:
+          target_frames = None
+
+        occurence = ResourceExceptionOccurence(
+          chain,
+          target=msg.source,
+          target_frames=target_frames,
+        )
       else:
         occurence = RegularExceptionOccurence(chain)
 

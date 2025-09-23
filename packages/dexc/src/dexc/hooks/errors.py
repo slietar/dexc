@@ -23,7 +23,6 @@ def install_errors(*, file: IO[str] = sys.stderr, options: 'Optional[Options]' =
     dump(exc, file, options or Options())
 
   old_except_hook = sys.excepthook
-
   sys.excepthook = except_hook
 
 

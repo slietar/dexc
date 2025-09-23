@@ -4,6 +4,7 @@ import functools
 import itertools
 from abc import ABC
 from dataclasses import dataclass, field
+from tracemalloc import Frame as TracemallocFrame, Traceback as TracemallocTraceback
 from types import NoneType, TracebackType
 from typing import Iterable, Literal, Optional, TypeAlias
 
@@ -84,15 +85,15 @@ def create_frame_area(
       return None
 
 
-@dataclass(eq=True, frozen=True, slots=True)
+@dataclass(eq=True, frozen=True, kw_only=True, slots=True)
 class FrameItem:
   area: Optional[FrameArea]
-  hidden: bool
+  hidden: bool = False
   module: ModuleInfo
-  target: Optional[AstTarget]
+  target: Optional[AstTarget] = None
   target_is_module: bool # Indicates whether the target is the module's root (should not be used unless target is None)
-  target_name: Optional[str]
-  reraise: bool
+  target_name: Optional[str] = None
+  reraise: bool = False
 
   @property
   def important(self):
@@ -156,9 +157,9 @@ class UnraisableExceptionOccurence:
 
 @dataclass(slots=True)
 class ResourceExceptionOccurence:
-  # TODO: Add allocation trace
   chain: ExceptionChain
   target: object
+  target_frames: Optional[list[FrameItem]] = None
 
 ExceptionOccurence: TypeAlias = RegularExceptionOccurence | UnraisableExceptionOccurence | ResourceExceptionOccurence
 
@@ -237,12 +238,8 @@ def extract_exc_frames(exc: BaseException, /):
 
     frame = FrameItem(
       area=area,
-      hidden=False,
       module=module_info,
-      reraise=False,
-      target=None,
       target_is_module=(module_info.name_segments is not None),
-      target_name=None,
     )
 
     frames.append(frame)
@@ -306,6 +303,30 @@ def extract_tb_frames(start_tb: TracebackType, /):
     frames.append(frame)
 
   return frames
+
+
+def extract_tracemalloc_traceback(traceback: TracemallocTraceback, /):
+  inspector = get_inspector()
+
+  def map_tracemalloc_frame(frame: TracemallocFrame):
+    area = FrameAreaLines(frame.lineno, frame.lineno)
+    module_info = inspector.inspect(frame.filename)
+
+    # TODO: Support __tracebackhide__
+
+    if (module_info.ast is not None) and (area is not None):
+      target = identify_node(module_info.ast, area)
+    else:
+      target = None
+
+    return FrameItem(
+      area=area,
+      module=module_info,
+      target=target,
+      target_is_module=(module_info.name_segments is not None),
+    )
+
+  return [map_tracemalloc_frame(frame) for frame in traceback]
 
 
 def identify_node(module: ast.Module, area: FrameArea):
