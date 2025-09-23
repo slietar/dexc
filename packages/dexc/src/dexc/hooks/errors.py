@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 def install_errors(*, file: IO[str] = sys.stderr, options: 'Optional[Options]' = None, set_lib_envs: bool = True, set_unraisable: bool = True):
   from ..vendor import get_ipython
 
-  # Set main hook
+  # Set the main hook
 
   def except_hook(exc_type: type[BaseException], exc: BaseException, start_tb: TracebackType):
     from ..lib import dump
@@ -36,13 +36,16 @@ def install_errors(*, file: IO[str] = sys.stderr, options: 'Optional[Options]' =
 
     old_unraisable_hook = sys.unraisablehook
 
+    # See: https://mail.python.org/pipermail/python-dev/2019-May/157462.html
+    # See: https://vstinner.github.io/sys-unraisablehook-python38.html
     def unraisable_hook(arg: 'UnraisableHookArgs'):
-      assert arg.exc_value is not None
-
-      # Not using dump() because must lazy imports cannot be used while the
-      # interpreter is shutting down, which is often the case when this hook is
-      # called.
-      render(extract(arg.exc_value), file, options or Options())
+      if arg.exc_value is not None:
+        # Not using dump() because must lazy imports cannot be used while the
+        # interpreter is shutting down, which is often the case when this hook is
+        # called.
+        render(extract(arg.exc_value), file, options or Options())
+      else:
+        old_unraisable_hook(arg)
 
     sys.unraisablehook = unraisable_hook
   else:

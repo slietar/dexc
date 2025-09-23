@@ -1,18 +1,23 @@
 import os
 import sys
 from dataclasses import dataclass, field
-from pprint import pprint
-from typing import (IO, Any, Container, Generator, Iterable, Literal, Optional,
-                    Sequence, TypeAlias)
+from typing import IO, Any, Container, Iterable, Literal, Optional, Sequence, TypeAlias
 
 from . import util
 from .compression import Atom
 from .compression.greedy import compress
-from .extract import (ExceptionChain, FrameAreaFull, FrameAreaLines,
-                      FrameAreaStartLine, FrameAreaStartLineCol, FrameItem,
-                      ModuleInfo)
+from .extract import (
+  ExceptionChain,
+  ExceptionInstanceDetails,
+  FrameAreaFull,
+  FrameAreaLines,
+  FrameAreaStartLine,
+  FrameAreaStartLineCol,
+  FrameItem,
+  ModuleInfo,
+)
 from .options import Options
-from .util import UnreachableError, reversed_if
+from .util import UnreachableError
 from .vendor import get_ipython
 
 
@@ -272,14 +277,12 @@ def render_item(
 
     current_width = width - len(current_prefix) - len(current_indent)
 
-    if isinstance(item.instance, SyntaxError):
-      desc = item.instance.args[0]
-    else:
-      desc = str(item.instance)
+    desc = item.details.description
 
+    # Checking for both None and ''
     desc_lines = desc.splitlines() if desc else []
 
-    exc_type_name = util.wrap_into_ellipsis(type(item.instance).__name__, ellipsis=symbols.ellipsis, width=width)
+    exc_type_name = util.wrap_into_ellipsis(item.details.exc_class.__name__, ellipsis=symbols.ellipsis, width=width)
     exc_type_sep = ': '
 
     if desc_lines and (len(desc_lines[0]) <= width_first - len(exc_type_name) - len(exc_type_sep)):
@@ -320,7 +323,11 @@ def render_item(
 
     # Notes
 
-    notes: list[str] = getattr(item.instance, '__notes__', [])
+    if isinstance(item.details, ExceptionInstanceDetails):
+      notes: list[str] = getattr(item.details.instance, '__notes__', [])
+    else:
+      notes = []
+
     note_width = current_width
 
     note_header_str = 'note'
@@ -906,7 +913,7 @@ def render_frames(
 
               newline_required = True
 
-        case LibraryFrameAggregate(frames=agg_frames, package_name=name):
+        case LibraryFrameAggregate(frames=agg_frames, package_name=_name):
           assert atom.repeat_count == 1
 
           def map_frame(frame: FrameItem):

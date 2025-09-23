@@ -106,15 +106,61 @@ class FrameItem:
 ExceptionChainRelation: TypeAlias = Literal['cause', 'context']
 
 @dataclass(slots=True)
+class ExceptionInstanceDetails:
+  instance: BaseException
+
+  @property
+  def exc_class(self):
+    return type(self.instance)
+
+  @property
+  def description(self):
+    if isinstance(self.instance, SyntaxError):
+      return self.instance.args[0]
+    else:
+      return str(self.instance)
+
+@dataclass(slots=True)
+class ExceptionPairDetails:
+  category: type[BaseException]
+  message: Optional[str]
+
+  @property
+  def exc_class(self):
+    return self.category
+
+  @property
+  def description(self):
+    return self.message
+
+@dataclass(slots=True)
 class ExceptionItem:
   children: 'list[ExceptionChain]'
+  details: ExceptionInstanceDetails | ExceptionPairDetails
   frames: list[FrameItem]
-  instance: BaseException
 
 @dataclass(slots=True)
 class ExceptionChain:
   items: list[ExceptionItem]
   relations: list[ExceptionChainRelation]
+
+
+@dataclass(slots=True)
+class RegularExceptionOccurence:
+  chain: ExceptionChain
+
+@dataclass(slots=True)
+class UnraisableExceptionOccurence:
+  chain: ExceptionChain
+  target: object
+
+@dataclass(slots=True)
+class ResourceExceptionOccurence:
+  # TODO: Add allocation trace
+  chain: ExceptionChain
+  target: object
+
+ExceptionOccurence: TypeAlias = RegularExceptionOccurence | UnraisableExceptionOccurence | ResourceExceptionOccurence
 
 
 def extract(start_exc: BaseException, /):
@@ -143,8 +189,8 @@ def extract_exc_chain(start_exc: BaseException, /):
   def map_exc(exc: BaseException):
     return ExceptionItem(
       children=([extract_exc_chain(exc) for exc in exc.exceptions] if isinstance(exc, BaseExceptionGroup) else []),
+      details=ExceptionInstanceDetails(exc),
       frames=extract_exc_frames(exc),
-      instance=exc,
     )
 
   return ExceptionChain([map_exc(exc) for exc in excs], relations=relations)
@@ -302,7 +348,7 @@ def identify_node(module: ast.Module, area: FrameArea):
     match current_node:
       case ast.Call(func, args, keywords):
         nonchildren_candidates = [func, *args] + [keyword.value for keyword in keywords]
-      case ast.ClassDef(name, bases, keywords, body, decorator_list):
+      case ast.ClassDef(_name, bases, keywords, body, decorator_list):
         children_candidates += body
         children_candidates += decorator_list
         children_candidates += bases
@@ -314,7 +360,7 @@ def identify_node(module: ast.Module, area: FrameArea):
         children_candidates += [test, *body, *orelse]
       case ast.Module(body=body):
         children_candidates += body
-      case ast.AsyncFor(target, iter, body, orelse, type_comment) | ast.For(target, iter, body, orelse, type_comment):
+      case ast.AsyncFor(target, iter, body, orelse, _type_comment) | ast.For(target, iter, body, orelse, _type_comment):
         children_candidates += [target, iter, *body, *orelse]
       case ast.Try(body, handlers, orelse, finalbody) | ast.TryStar(body, handlers, orelse, finalbody):
         children_candidates += [*body, *orelse, *finalbody]
@@ -322,7 +368,7 @@ def identify_node(module: ast.Module, area: FrameArea):
 
         for handler in handlers:
           children_candidates += handler.body
-      case ast.AsyncWith(items, body, type_comment) | ast.With(items, body, type_comment):
+      case ast.AsyncWith(items, body, _type_comment) | ast.With(items, body, _type_comment):
         children_candidates += (item.context_expr for item in items)
         children_candidates += body
 
