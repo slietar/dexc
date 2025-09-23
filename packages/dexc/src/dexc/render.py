@@ -9,12 +9,17 @@ from .compression.greedy import compress
 from .extract import (
   ExceptionChain,
   ExceptionInstanceDetails,
+  ExceptionItem,
+  ExceptionOccurence,
   FrameAreaFull,
   FrameAreaLines,
   FrameAreaStartLine,
   FrameAreaStartLineCol,
   FrameItem,
   ModuleInfo,
+  RegularExceptionOccurence,
+  ResourceExceptionOccurence,
+  UnraisableExceptionOccurence,
 )
 from .options import Options
 from .util import UnreachableError
@@ -170,7 +175,7 @@ def aggregate_frames(frames: Iterable[FrameItem], options: Options):
 RenderProfile: TypeAlias = Literal['default', 'warning']
 
 def render(
-  chain: ExceptionChain,
+  occurence: ExceptionOccurence,
   file: IO[str],
   options: Options,
   prefix: str = '',
@@ -186,6 +191,23 @@ def render(
   debug = False
   newline_required = False
   symbols = _symbols if _symbols is not None else Symbols.from_file(file, options)
+
+  match occurence:
+    case RegularExceptionOccurence() | UnraisableExceptionOccurence():
+      chain = occurence.chain
+    case ResourceExceptionOccurence():
+      if occurence.target_frames is not None:
+        chain = ExceptionChain(
+          items=[ExceptionItem(
+            details=occurence.chain.items[0].details,
+            frames=occurence.target_frames,
+          )],
+          relations=[],
+        )
+      else:
+        chain = occurence.chain
+    case _:
+      raise UnreachableError
 
   for line_index, (line, line_len) in enumerate(render_item(
     chain,

@@ -2,6 +2,7 @@ import os
 import sys
 from typing import IO, TYPE_CHECKING
 
+from .extract import RegularExceptionOccurence
 from .hooks.errors import install_errors
 from .hooks.warnings import install_warnings
 
@@ -18,7 +19,7 @@ def dump(exc: BaseException, file: IO[str], options: 'Options'):
   from .extract import extract
   from .render import render
 
-  render(extract(exc), file, options)
+  render(RegularExceptionOccurence(extract(exc)), file, options)
 
 
 def install():

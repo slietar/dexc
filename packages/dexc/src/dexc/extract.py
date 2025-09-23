@@ -4,12 +4,12 @@ import functools
 import itertools
 from abc import ABC
 from dataclasses import dataclass, field
-from tracemalloc import Frame as TracemallocFrame, Traceback as TracemallocTraceback
+from tracemalloc import Frame as TracemallocFrame
+from tracemalloc import Traceback as TracemallocTraceback
 from types import NoneType, TracebackType
 from typing import Iterable, Literal, Optional, TypeAlias
 
 from .inspector import ModuleInfo, ModuleInspector, PartialSource
-
 
 AncestorKind: TypeAlias = Literal['class', 'function', 'method']
 AstNode: TypeAlias = ast.Module | ast.expr | ast.stmt
@@ -134,16 +134,16 @@ class ExceptionPairDetails:
   def description(self):
     return self.message
 
-@dataclass(slots=True)
+@dataclass(kw_only=True, slots=True)
 class ExceptionItem:
-  children: 'list[ExceptionChain]'
+  children: 'list[ExceptionChain]' = field(default_factory=list)
   details: ExceptionInstanceDetails | ExceptionPairDetails
   frames: list[FrameItem]
 
 @dataclass(slots=True)
 class ExceptionChain:
   items: list[ExceptionItem]
-  relations: list[ExceptionChainRelation]
+  relations: list[ExceptionChainRelation] = field(default_factory=list, kw_only=True)
 
 
 @dataclass(slots=True)

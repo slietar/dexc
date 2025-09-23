@@ -6,7 +6,7 @@ from typing import IO, TYPE_CHECKING, Optional
 if TYPE_CHECKING:
   from sys import UnraisableHookArgs
 
-  from IPython.core.interactiveshell import InteractiveShell
+  from IPython.core.interactiveshell import InteractiveShell # type: ignore
 
   from ..options import Options
 
@@ -29,7 +29,7 @@ def install_errors(*, file: IO[str] = sys.stderr, options: 'Optional[Options]' =
   # Set the unraisable hook
 
   if set_unraisable:
-    from ..extract import extract
+    from ..extract import UnraisableExceptionOccurence, extract
     from ..options import Options
     from ..render import render
 
@@ -42,7 +42,11 @@ def install_errors(*, file: IO[str] = sys.stderr, options: 'Optional[Options]' =
         # Not using dump() because must lazy imports cannot be used while the
         # interpreter is shutting down, which is often the case when this hook is
         # called.
-        render(extract(arg.exc_value), file, options or Options())
+        render(
+          UnraisableExceptionOccurence(extract(arg.exc_value), arg.object),
+          file,
+          options or Options(),
+        )
       else:
         old_unraisable_hook(arg)
 

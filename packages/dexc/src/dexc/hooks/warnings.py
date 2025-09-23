@@ -44,7 +44,7 @@ def display_warning(occurence: ExceptionOccurence, options: 'Optional[Options]',
   )
 
   render(
-    occurence.chain,
+    occurence,
     effective_file,
     effective_options,
     prefix=f'{symbols.color_orange}{symbols.box_vertical}{symbols.color_reset} ',
