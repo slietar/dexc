@@ -1,7 +1,6 @@
 import math
 import re
 import sys
-from pathlib import Path
 from types import TracebackType
 from typing import Callable, Iterable, Optional, Reversible, Sequence, TypeVar
 
