@@ -19,7 +19,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
       - name: Build package distributions
         run: |
-          uv build --out-dir dist --project packages/dexc --wheel
-          uv build --out-dir dist --project packages/dexc-autoinstall --wheel
+          uv build --out-dir dist --package dexc --wheel
+          uv build --out-dir dist --package dexc-autoinstall --wheel
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
