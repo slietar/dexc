@@ -4,7 +4,7 @@ build-backend = "oryn"
 
 [project]
 name = "dexc"
-version = "0.4.0"
+version = "1.0"
 description = "Exception formatter"
 license = "EUPL-1.2"
 readme = "../../readme.md"
