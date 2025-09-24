@@ -1,4 +1,4 @@
-# dexc
+# Dexc
 
 Dexc is a Python exception formatter. It supports Python 3.11 and later.
 
@@ -9,7 +9,7 @@ Dexc is a Python exception formatter. It supports Python 3.11 and later.
 - Truncated trace lines when there are too many
 - Colorized stack trace obeying the the [NO_COLOR](https://no-color.org/) environment variable
 - Minimization of frames when they are not part of the user code
-- Support for Exception groups
+- Support for exception groups
 - Highlighting of re-raises i.e. when an exception is caught and re-raised with more than a simple `raise`, causing two stack traces to be concatenated without separation
 - Handling of [unraisable exceptions](https://docs.python.org/3/library/sys.html#sys.unraisablehook) e.g. raised in a destructor
 - Support for syntax errors
@@ -17,6 +17,9 @@ Dexc is a Python exception formatter. It supports Python 3.11 and later.
 - Support for warnings
 - Collapse of repeated frames or groups of frames
 - Disabling using the `DEXC_DISABLE=1` environment variable
+- Support for allocation tracebacks occurring when a resource (such as a file object) is leaked or a coroutine is never awaited, given `-X tracemalloc=N` is set
+- Detection of repeated frames or frame groups
+- Support for IPython cells
 
 
 ## Caveats

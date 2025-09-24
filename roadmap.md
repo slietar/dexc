@@ -60,7 +60,7 @@
 - [x] Exception notes (PEP 678)
 - [x] Print less whitespace
 - [x] Remove final newline
-- [ ] Configuration versioning
+- [-] Configuration versioning
 - [-] When printing a RecursionError, do not display any traces
 - [-] Merge warnings
 - [ ] Remove duplicates in exception groups
@@ -130,6 +130,51 @@
 - [ ] When considering highlighting lines (and not particular columns), check if
   there could be an ambiguity with a parent expression that is on the same lines
 - [ ] Ensure same ordering as native Python
+- [-] Detect file rewrite by checking the mtime of the file
+- [x] Support for Python 3.11
+- [ ] Improve highlight of binary operators and subscripts [see ref](https://discuss.python.org/t/how-do-you-use-co-positions-pep-657/31139/4)
+- [ ] Smarter highlighting that uses less lines
+- [ ] Put `X more lines` on the same line as the last line of code but later - right align it
+- [ ] Don't show source line for `KeyboardInterrupt` despite it not being an explicit raise
+- [ ] Hide simple function calls
+- [ ] Allow to specify modules which are actually user modules
+- [ ] Better handling of chains, perhaps the origin of the cause should be better highlighted
+- [ ] On calls, make sure to put function names in bold
+- [ ] Bug:
+  ```
+  in modules pandas.core.* [6 frames]
+  at pandas._libs.properties.CachedProperty.__get__                                properties.pyx:36
+  in module pandas.core.internals.blocks
+  ```
+- [ ] Decrease the amount of information displayed the more outward the frame is
+- [ ] Use `$COLORFGBG` or `\x1b]11;?\x07` to detect dark mode
+- [ ] Bug with `assert atom.repeat_count == 1` (see screenshot june 4)
+- [ ] Add gap in exception groups (see screenshot june 4 11:26am)
+- [ ] Integration with `logging`
+- [ ] Still display syntax errors in dependencies
+- [ ] Fix relative path location in projects with a `src/` layout - stop relying on cwd too much
+- [ ] Check correct indentation of cause in exception groups
+- [ ] Special display when all frames are from libraries (see screenshot june 27 3:08pm)
+- [?] Infinite loop (see screenshot july 2 3:21pm)
+- [ ] Be more explicit about unraisable exceptions, e.g. tell that they were raised in a `__del__` method
+- [x] Nesting many task groups gives an unreadable error
+- [x] In `sys.unraisablehook`, `sys.path` may be `None` (see screenshot sep 6 1:00am)
+- [?] Infinite loop `while True` of `extract()`
+- [ ] Flattening of exception groups when there is only one exception
+- [ ] Display frames with most recently edited file
+- [ ] Option to disallow filesystem access
+- [x] Handle `sys.unraisablehook` with `exc_value` being `None`
+- [ ] Log object in `sys.unraisablehook`
+- [x] Allocation trace for ResourceWarning
+- [ ] Add `DEXC_EXHAUSTIVE`
+- [ ] Check `__tracebackhide__`
+- [ ] Disable when `__debug__` is `False` or not in a terminal
+- [x] Remove reliance on `ExceptionItem.instance`, for both warnings and unraisablehook
+- [ ] Use `linecache` instead of reading files directly
+- [ ] Detect file modifications by checking `st_mtime` and `st_ino`
+- [ ] Allow putting error message at the bottom
+- [ ] Useless blank line in t02 and t03 above "[...]"
+- [ ] Thread errors
 
 Manipulating locals: see PEP 667
 Cool error reporting: https://lib.rs/crates/ariadne
