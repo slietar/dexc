@@ -93,7 +93,7 @@ def install_errors(*, file: IO[str] = sys.stderr, options: 'Optional[Options]' =
       os.environ['HYDRA_FULL_ERROR'] = '1'
 
     if 'JAX_TRACEBACK_FILTERING' not in os.environ:
-      os.environ['JAX_TRACEBACK_FILTERING'] = '1'
+      os.environ['JAX_TRACEBACK_FILTERING'] = 'off'
 
 
   # Prepare the cleanup function
