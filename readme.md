@@ -20,6 +20,7 @@ Dexc is a Python exception formatter. It supports Python 3.11 and later.
 - Support for allocation tracebacks occurring when a resource (such as a file object) is leaked or a coroutine is never awaited, given `-X tracemalloc=N` is set
 - Detection of repeated frames or frame groups
 - Support for IPython cells
+- Support for exceptions from the `logging` module
 
 
 ## Caveats

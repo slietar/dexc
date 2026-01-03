@@ -4,6 +4,7 @@ from typing import IO, TYPE_CHECKING
 
 from .extract import RegularExceptionOccurence
 from .hooks.errors import install_errors
+from .hooks.logging import install_logging
 from .hooks.warnings import install_warnings
 
 if TYPE_CHECKING:
@@ -24,6 +25,7 @@ def dump(exc: BaseException, file: IO[str], options: 'Options'):
 
 def install():
   install_errors()
+  install_logging()
   install_warnings()
 
 
