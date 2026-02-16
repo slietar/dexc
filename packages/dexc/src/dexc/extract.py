@@ -4,12 +4,18 @@ import functools
 import itertools
 from abc import ABC
 from dataclasses import dataclass, field
-from tracemalloc import Frame as TracemallocFrame
-from tracemalloc import Traceback as TracemallocTraceback
 from types import NoneType, TracebackType
-from typing import Iterable, Literal, Optional, TypeAlias
+from typing import TYPE_CHECKING, Iterable, Literal, Optional, TypeAlias
 
 from .inspector import ModuleInfo, ModuleInspector, PartialSource
+
+
+# The tracemalloc module is not available in subinterpreters, so we only import
+# it for type checking
+if TYPE_CHECKING:
+  from tracemalloc import Frame as TracemallocFrame
+  from tracemalloc import Traceback as TracemallocTraceback
+
 
 AncestorKind: TypeAlias = Literal['class', 'function', 'method']
 AstNode: TypeAlias = ast.Module | ast.expr | ast.stmt
