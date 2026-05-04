@@ -311,10 +311,10 @@ def extract_tb_frames(start_tb: TracebackType, /):
   return frames
 
 
-def extract_tracemalloc_traceback(traceback: TracemallocTraceback, /):
+def extract_tracemalloc_traceback(traceback: 'TracemallocTraceback', /):
   inspector = get_inspector()
 
-  def map_tracemalloc_frame(frame: TracemallocFrame):
+  def map_tracemalloc_frame(frame: 'TracemallocFrame'):
     area = FrameAreaLines(frame.lineno, frame.lineno)
     module_info = inspector.inspect(frame.filename)
 

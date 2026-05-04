@@ -420,7 +420,7 @@ def render_item(
 
       for atom_inner_index, (atom_display_index, atom) in enumerate(util.reversed_if(list(enumerate(atoms)), not options.inner_frame_on_top)):
         for agg_frame_index, agg_frame in util.reversed_if(list(enumerate(atom.realization[:len(atom.keys)])), not options.inner_frame_on_top):
-          if isinstance(agg_frame, FrameItem) and agg_frame.important and agg_frame.traceable and (len(trace_indices) < options.max_traces):
+          if isinstance(agg_frame, FrameItem) and agg_frame.important and agg_frame.traceable and (not agg_frame.hidden) and (len(trace_indices) < options.max_traces):
             trace_indices.add((atom_display_index, agg_frame_index))
 
       frame_indent = current_indent
