@@ -86,6 +86,12 @@ def install_warnings(*, options: 'Optional[Options]' = None):
 
 
   if platform.python_implementation() == 'CPython':
+    try:
+      import tracemalloc
+    except ImportError:
+      # The import fails in subinterpreters
+      tracemalloc = None
+
     def hook_showwarnmsg(msg: WarningMessage):
       if isinstance(msg.message, Warning):
         details = ExceptionInstanceDetails(msg.message)
@@ -106,9 +112,7 @@ def install_warnings(*, options: 'Optional[Options]' = None):
 
       chain = ExceptionChain([item], relations=[])
 
-      if msg.source is not None:
-        import tracemalloc
-
+      if (msg.source is not None) and (tracemalloc is not None):
         target_traceback = tracemalloc.get_object_traceback(msg.source)
 
         if target_traceback is not None:
