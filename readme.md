@@ -23,21 +23,16 @@ Dexc is a Python exception formatter. It supports Python 3.11 and later.
 - Support for exceptions from the `logging` module
 
 
-## Caveats
+## Auto-installation
 
-Dexc should not be used in production code or to format untrusted exceptions. Because it relies on certain CPython-specific APIs, it may break on other runtimes or if your code displays exotic behavior, such as modifying `sys.modules` or updating source files while the program is running.
+Dexc auto-installs itself when installing the `dexc-autoinstall` package from PyPI. This adds a `.pth` file executed on Python startup.
 
-Furthermore, Dexc may produce incorrect output if your code or exception messages contain non-ASCII characters.
-
-
-## Installation
-
-```sh
-$ pip install dexc
-```
+If using `uv`, use Dexc without installing it by running `uv run --with dexc-autoinstall python ...`.
 
 
-## Usage
+## Programmatic usage
+
+Dexc is available on PyPI under the name `dexc`.
 
 ```py
 import dexc
@@ -47,6 +42,13 @@ dexc.install()
 
 import dexc.autoinstall
 ```
+
+
+## Caveats
+
+Dexc should not be used in production code or to format untrusted exceptions. Because it relies on certain CPython-specific APIs, it may break on other runtimes or if your code displays exotic behavior, such as modifying `sys.modules` or updating source files while the program is running.
+
+Furthermore, Dexc may produce incorrect output if your code or exception messages contain non-ASCII characters.
 
 
 ## Related work

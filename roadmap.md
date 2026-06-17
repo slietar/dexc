@@ -175,6 +175,11 @@
 - [ ] Allow putting error message at the bottom
 - [ ] Useless blank line in t02 and t03 above "[...]"
 - [ ] Thread errors
+- [ ] Indentation problem in "An attempt has been made to start a new process before the current process has finished its bootstrapping phase."
+- [ ] Pickling of extracted errors
+- [ ] Rebuild of extracted errors into exceptions: see https://naleraphael.github.io/blog/posts/devlog_create_a_builtin_frame_object/
+- [ ] Calling `dexc.extract()` conflicts with the module
+- [ ] When running a console script, the name of the executable in shown
 
 Manipulating locals: see PEP 667
 Cool error reporting: https://lib.rs/crates/ariadne
